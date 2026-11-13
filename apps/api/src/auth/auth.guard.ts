@@ -1,0 +1,74 @@
+import {
+  CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable, SetMetadata,
+  UnauthorizedException, createParamDecorator,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import * as jwt from 'jsonwebtoken';
+import { Config } from '../config';
+import { CONFIG, Db } from '../db/db.module';
+
+export const ROLES = [
+  'ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'DISTRIBUTION_MANAGER',
+  'DISTRIBUTOR', 'STOREKEEPER', 'ACCOUNTANT', 'PROJECT_SUPERVISOR', 'AUDITOR',
+] as const;
+export type Role = (typeof ROLES)[number];
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: Role;
+}
+
+const PUBLIC_KEY = 'isPublic';
+const ROLES_KEY = 'roles';
+
+/** مسار لا يحتاج دخولاً. */
+export const Public = () => SetMetadata(PUBLIC_KEY, true);
+/** الأدوار المأذون لها. كل مسار غير عامّ يجب أن يحمل هذا الوسم، وإلا رُفض. */
+export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);
+/** كل من سجّل دخوله. */
+export const AnyRole = () => SetMetadata(ROLES_KEY, [...ROLES]);
+
+export const CurrentUser = createParamDecorator(
+  (_: unknown, ctx: ExecutionContext): AuthUser => ctx.switchToHttp().getRequest().user,
+);
+
+@Injectable()
+export class AuthGuard implements CanActivate {
+  constructor(
+    @Inject(Reflector) private readonly reflector: Reflector,
+    @Inject(CONFIG) private readonly config: Config,
+    @Inject(Db) private readonly db: Db,
+  ) {}
+
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    const targets = [ctx.getHandler(), ctx.getClass()];
+    if (this.reflector.getAllAndOverride<boolean>(PUBLIC_KEY, targets)) return true;
+
+    const req = ctx.switchToHttp().getRequest();
+    const header: string | undefined = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) throw new UnauthorizedException('يلزم تسجيل الدخول');
+
+    let userId: string;
+    try {
+      const claims = jwt.verify(header.slice(7), this.config.JWT_SECRET, { algorithms: ['HS256'] });
+      userId = (claims as jwt.JwtPayload).sub as string;
+    } catch {
+      throw new UnauthorizedException('جلسة غير صالحة أو منتهية');
+    }
+
+    // يُقرأ الدور من القاعدة في كل طلب، فتعطيل الحساب أو تغيير دوره يسري فوراً.
+    const { rows } = await this.db.query(
+      'select id, username, role from users where id = $1 and active',
+      [userId],
+    );
+    if (!rows[0]) throw new UnauthorizedException('الحساب معطَّل أو غير موجود');
+    req.user = rows[0] as AuthUser;
+
+    const allowed = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, targets);
+    if (!allowed || !allowed.includes(req.user.role)) {
+      throw new ForbiddenException('لا صلاحية لك في هذه العملية');
+    }
+    return true;
+  }
+}
