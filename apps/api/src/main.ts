@@ -1,5 +1,8 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import express from 'express';
+import { existsSync } from 'fs';
+import { join, resolve } from 'path';
 import { AppModule } from './app.module';
 import { loadConfig } from './config';
 
@@ -17,6 +20,16 @@ async function bootstrap() {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     next();
   });
+  // في النشر يخدم الخادم نفسه لوحة الإدارة المبنيّة، فيكفي النظامَ حاويةٌ واحدة وعنوان واحد.
+  const adminDist = process.env.ADMIN_DIST ? resolve(process.env.ADMIN_DIST) : null;
+  if (adminDist && existsSync(join(adminDist, 'index.html'))) {
+    // الملفات المبنيّة تحمل بصمة محتواها في أسمائها، فتُحفظ في المتصفح سنة.
+    app.use('/assets', express.static(join(adminDist, 'assets'), { immutable: true, maxAge: '365d', fallthrough: false,
+      setHeaders: (res: { setHeader: (k: string, v: string) => void }) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable') }));
+    app.use(express.static(adminDist, { index: false }));
+    app.use((req: { method: string; path: string }, res: { sendFile: (p: string) => void }, next: () => void) =>
+      req.method === 'GET' && !req.path.startsWith('/api/') ? res.sendFile(join(adminDist, 'index.html')) : next());
+  }
   app.enableShutdownHooks();
   await app.listen(config.PORT);
 }

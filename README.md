@@ -33,6 +33,26 @@ pnpm dev                    # ثم افتح العنوان الذي يطبعه
 ADMIN_PASSWORD=... node e2e/smoke.cjs
 ```
 
+## النشر على خادم
+
+يلزم خادم فيه Docker واسم نطاق يشير إليه.
+
+```bash
+cp deploy/.env.example .env      # املأ النطاق وكلمة سر القاعدة والمفاتيح الأربعة
+docker compose up -d --build     # القاعدة، والتطبيق (الخادم ومعه اللوحة)، و Caddy لشهادة HTTPS
+docker compose exec -e ADMIN_PASSWORD='...' app node dist/db/seed.js   # حساب المدير الأول، مرة واحدة
+```
+
+المفاتيح في `.env` لا تُبدَّل بعد أول تشغيل، ولا تُحفظ مع النسخ الاحتياطية في موضع واحد.
+
+## النسخ الاحتياطي والاسترجاع
+
+```bash
+DATABASE_URL=... STORAGE_DIR=... BACKUP_PASSPHRASE_FILE=... scripts/backup.sh /backups    # ملف واحد مشفّر
+DATABASE_URL=<قاعدة فارغة> STORAGE_DIR=<مجلد فارغ> BACKUP_PASSPHRASE_FILE=... scripts/restore.sh /backups/eywaa-....tar.enc
+DATABASE_URL=... node apps/api/dist/db/verify.js     # سلسلة التدقيق، وتوازن القيود، وأعداد الجداول
+```
+
 ## الاختبارات
 
 تحتاج قاعدة فارغة تُمحى في كل تشغيل؛ عنوانها في `TEST_DATABASE_URL`
@@ -41,6 +61,9 @@ ADMIN_PASSWORD=... node e2e/smoke.cjs
 ```bash
 cd apps/api
 pnpm test
-# معيار قبول كشف التكرار على 10,000 عائلة (بضع دقائق):
+# معايير القبول بالأحجام الكبيرة (كشف التكرار، النقاط، التنبيهات، الحمل):
 pnpm jest --rootDir . --testMatch '**/*.bench.ts' --testTimeout 900000
+
+# اختبارات المتصفح، كل ملف على قاعدة فارغة والخادم واللوحة يعملان:
+cd ../admin && ADMIN_PASSWORD=... node e2e/families.cjs
 ```

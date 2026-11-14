@@ -1,0 +1,47 @@
+# تشغيل النظام على خادم واحد: قاعدة البيانات، والتطبيق، وCaddy لشهادة HTTPS.
+# قبل التشغيل: انسخ deploy/.env.example إلى .env واملأه.   docker compose up -d
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eywaa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: eywaa
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eywaa"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://eywaa:${POSTGRES_PASSWORD}@db:5432/eywaa
+      JWT_SECRET: ${JWT_SECRET:?}
+      FIELD_ENC_KEY: ${FIELD_ENC_KEY:?}
+      FIELD_HMAC_KEY: ${FIELD_HMAC_KEY:?}
+      TOKEN_SIGNING_SEED: ${TOKEN_SIGNING_SEED:?}
+    volumes:
+      - storage:/data/storage
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+
+volumes:
+  db:
+  storage:
+  caddy:

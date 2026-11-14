@@ -5,7 +5,8 @@ export class ZodPipe<T> implements PipeTransform {
   constructor(private readonly schema: ZodType<T>) {}
 
   transform(value: unknown): T {
-    const result = this.schema.safeParse(value);
+    // طلب بلا جسم يُعامَل كجسم فارغ: يصحّ إن كانت الحقول كلها اختيارية، وإلا ذُكر الناقص منها باسمه.
+    const result = this.schema.safeParse(value === undefined ? {} : value);
     if (!result.success) {
       throw new BadRequestException({
         message: 'بيانات غير صالحة',
