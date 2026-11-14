@@ -16,6 +16,8 @@ import { DistributionController } from './distribution/distribution.controller';
 import { DistributionService } from './distribution/distribution.service';
 import { FamiliesController } from './families/families.controller';
 import { FamiliesService } from './families/families.service';
+import { HousingController } from './housing/housing.controller';
+import { HousingService } from './housing/housing.service';
 import { InventoryController } from './inventory/inventory.controller';
 import { InventoryService } from './inventory/inventory.service';
 import { Channels } from './notifications/channels';
@@ -34,10 +36,10 @@ import { UsersController } from './users/users.controller';
   imports: [DbModule],
   controllers: [
     AuthController, UsersController, AuditController, SettingsController, StatsController,
-    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController,
+    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, InventoryService, AccountingService, DistributionService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, InventoryService, AccountingService, DistributionService, HousingService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

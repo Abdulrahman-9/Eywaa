@@ -14,7 +14,7 @@ export class AccountingController {
   constructor(@Inject(AccountingService) private readonly accounting: AccountingService) {}
 
   @Get('summary')
-  @Roles(...READERS)
+  @Roles(...READERS, 'PROJECT_SUPERVISOR')
   summary() {
     return this.accounting.summary();
   }

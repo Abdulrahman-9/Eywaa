@@ -15,6 +15,7 @@ import { Programs } from './pages/Programs';
 import { Register } from './pages/Register';
 import { Review } from './pages/Review';
 import { Scoring } from './pages/Scoring';
+import { Housing, HousingProject } from './pages/Housing';
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
 import { Settings } from './pages/Settings';
@@ -33,7 +34,7 @@ function Message({ title, body }: { title: string; body: string }) {
 }
 
 const PAGES: Record<string, () => React.JSX.Element> = {
-  '/': Home, '/families': Families, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/campaigns': Campaigns, '/desk': Desk, '/notify': Notify, '/warehouse': Warehouse, '/cashbox': Cashbox, '/users': Users, '/audit': Audit, '/settings': Settings,
+  '/': Home, '/families': Families, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/campaigns': Campaigns, '/desk': Desk, '/notify': Notify, '/warehouse': Warehouse, '/cashbox': Cashbox, '/housing': Housing, '/users': Users, '/audit': Audit, '/settings': Settings,
 };
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 const FORBIDDEN = <Message title="لا صلاحية لك في هذه الصفحة" body="هذه الصفحة ليست من عمل دورك. إن رأيت أنك تحتاجها فراجع مدير النظام." />;
@@ -61,6 +62,7 @@ export function App() {
         <Route path="/families/:id" element={canSee(NAV.find((n) => n.to === '/families')!, user.role) ? <Family /> : FORBIDDEN} />
         <Route path="/campaigns/:id" element={canSee(NAV.find((n) => n.to === '/campaigns')!, user.role) ? <Campaign /> : FORBIDDEN} />
         <Route path="/campaigns/:id/tokens" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <Tokens /> : FORBIDDEN} />
+        <Route path="/housing/:id" element={canSee(NAV.find((n) => n.to === '/housing')!, user.role) ? <HousingProject /> : FORBIDDEN} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Message title="الصفحة غير موجودة" body="العنوان الذي طلبته لا يقابله شيء في النظام." />} />
       </Route>

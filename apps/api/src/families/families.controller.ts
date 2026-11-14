@@ -27,7 +27,7 @@ export class FamiliesController {
   }
 
   @Get('families')
-  @Roles('ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'DISTRIBUTION_MANAGER', 'AUDITOR')
+  @Roles('ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'DISTRIBUTION_MANAGER', 'PROJECT_SUPERVISOR', 'AUDITOR')
   list(@Query(new ZodPipe(listSchema)) query: z.infer<typeof listSchema>) {
     return this.families.list(query);
   }
@@ -47,7 +47,7 @@ export class FamiliesController {
   }
 
   @Get('families/:id')
-  @Roles('ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'DISTRIBUTION_MANAGER', 'AUDITOR')
+  @Roles('ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'DISTRIBUTION_MANAGER', 'PROJECT_SUPERVISOR', 'AUDITOR')
   get(@Param('id', ParseUUIDPipe) id: string) {
     return this.families.get(id);
   }

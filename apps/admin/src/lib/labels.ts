@@ -35,7 +35,7 @@ export type IncomeKind = keyof typeof INCOME_KINDS;
 
 export const ATTACHMENT_CATEGORIES = {
   PHOTO: 'صورة شخصية', IDENTITY: 'وثيقة هوية', RATION_CARD: 'البطاقة التموينية', RESIDENCE_CARD: 'بطاقة السكن',
-  MEDICAL: 'تقرير طبي', PAPER_FORM: 'الاستمارة الورقية', OTHER: 'أخرى', DELIVERY_PROOF: 'صورة تسليم',
+  MEDICAL: 'تقرير طبي', PAPER_FORM: 'الاستمارة الورقية', OTHER: 'أخرى', DELIVERY_PROOF: 'صورة تسليم', HOUSING_PROGRESS: 'صورة تقدّم البناء',
 } as const;
 export type AttachmentCategory = keyof typeof ATTACHMENT_CATEGORIES;
 

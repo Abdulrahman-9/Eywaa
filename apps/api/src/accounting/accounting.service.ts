@@ -42,11 +42,15 @@ export class AccountingService {
     return Number(rows[0].b);
   }
 
-  /** ما حُجز من الصندوق لحملات مالية جارية لم تُصرف بعد. */
+  /** ما حُجز من الصندوق ولم يُصرف بعد: حملات مالية جارية، وما بقي من ميزانيات منازل جارية. */
   private async reserved(c: { query: PoolClient['query'] }, fundId: string): Promise<number> {
     const { rows } = await (c as PoolClient).query(
-      `select coalesce(sum(e.quantity), 0)::bigint as r from entitlements e join campaigns c on c.id = e.campaign_id
-       where c.fund_id = $1 and c.status = 'ACTIVE' and e.status = 'PENDING'`,
+      `select (
+         coalesce((select sum(e.quantity) from entitlements e join campaigns c on c.id = e.campaign_id
+                   where c.fund_id = $1 and c.status = 'ACTIVE' and e.status = 'PENDING'), 0)
+         + coalesce((select sum(s.amount) from housing_stages s join housing_projects p on p.id = s.project_id
+                     where p.fund_id = $1 and p.status = 'ACTIVE' and s.status <> 'PAID'), 0)
+       )::bigint as r`,
       [fundId],
     );
     return Number(rows[0].r);
@@ -255,6 +259,27 @@ export class AccountingService {
     if (exists.rowCount) return;
     await c.query('select pg_advisory_xact_lock($1)', [LEDGER_LOCK]);
     await this.insert(c, { kind: 'DISBURSEMENT', status: 'POSTED', fundId: camp.fund_id, amount: d.quantity, description: `${camp.name}: العائلة ${d.familyNo}`, party: d.familyNo, category: 'مساعدات', custodyUser: d.actorId, entitlementId: d.entitlementId, debit: 'EXPENSE:مساعدات', credit: custodyAccount(d.actorId), actorId: d.actorId });
+  }
+
+  /** المتاح في الصندوق (نقده وعُهده ناقصاً المحجوز) يكفي هذا المبلغ، وإلا رُفض. */
+  async requireAvailable(c: PoolClient, fundId: string, need: number, what: string) {
+    await c.query('select pg_advisory_xact_lock($1)', [LEDGER_LOCK]);
+    const fund = await this.fund(c, fundId);
+    const have = Number((await c.query(
+      `select coalesce(sum(l.debit - l.credit), 0)::bigint as b from ledger_lines l join ledger_entries e on e.id = l.entry_id
+       where e.fund_id = $1 and e.status = 'POSTED' and (l.account = 'CASH' or l.account like 'CUSTODY:%')`, [fundId])).rows[0].b);
+    const free = have - (await this.reserved(c, fundId));
+    if (free < need) throw new ConflictException(`«${fund.name}» لا يكفي ${what}: المتاح فيه ${free.toLocaleString('en-US')} والمطلوب ${need.toLocaleString('en-US')}`);
+  }
+
+  /**
+   * صرف مثبَّت من نقد صندوق، لعملية اعتُمدت في موضعها (كدفعة مرحلة بناء تحقق منها موظف واعتمدها آخر).
+   * يُستدعى داخل معاملة تلك العملية.
+   */
+  async payFromFund(c: PoolClient, p: { fundId: string; amount: number; category: string; party: string; description: string; actorId: string }) {
+    await c.query('select pg_advisory_xact_lock($1)', [LEDGER_LOCK]);
+    await this.requireCash(c, p.fundId, p.amount);
+    return this.insert(c, { kind: 'PAYMENT', status: 'POSTED', fundId: p.fundId, amount: p.amount, description: p.description, party: p.party, category: p.category, debit: `EXPENSE:${p.category}`, credit: 'CASH', actorId: p.actorId });
   }
 
   // ---------- التقارير ----------
