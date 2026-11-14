@@ -9,7 +9,7 @@ import { Scanner } from './Scanner';
 
 type Locate = { token: string } | { campaignId: string; familyNo: string; code: string };
 interface Receiver { kind: 'HEAD' | 'PROXY'; name: string; proxyId?: string }
-interface Subject { via: 'ONLINE' | 'OFFLINE'; locate: Locate; entitlementId: string; familyNo: string; headName: string; quantity: number; receivers: Receiver[]; note?: string }
+interface Subject { via: 'ONLINE' | 'OFFLINE'; locate: Locate; entitlementId: string; familyNo: string; headName: string; quantity: number; receivers: Receiver[]; note?: string; photoUrl?: string | null }
 type Step =
   | { at: 'scan' }
   | { at: 'checking' }
@@ -40,9 +40,9 @@ export function Deliver({ onBack }: { onBack: () => void }) {
     const opId = crypto.randomUUID();
     if (getState().online && getState().token) {
       try {
-        const r = await api<{ entitlementId: string; familyNo: string; headName: string; quantity: number; atAssignedPoint: boolean; assignedPoint: string; receivers: Receiver[] }>(
+        const r = await api<{ entitlementId: string; familyNo: string; headName: string; quantity: number; atAssignedPoint: boolean; assignedPoint: string; receivers: Receiver[]; headPhotoUrl: string | null }>(
           '/deliveries/check', { token: getState().token, timeoutMs: 6000, body: { pointId: station.pointId, deviceId, locate } });
-        setStep({ at: 'receiver', opId, subject: { via: 'ONLINE', locate, entitlementId: r.entitlementId, familyNo: r.familyNo, headName: r.headName, quantity: r.quantity, receivers: r.receivers,
+        setStep({ at: 'receiver', opId, subject: { via: 'ONLINE', locate, entitlementId: r.entitlementId, familyNo: r.familyNo, headName: r.headName, quantity: r.quantity, receivers: r.receivers, photoUrl: r.headPhotoUrl,
           note: r.atAssignedPoint ? undefined : `نقطتها المعيَّنة: ${r.assignedPoint}. يجوز التسليم هنا والجهاز متصل.` } });
         return;
       } catch (err) {
@@ -147,6 +147,12 @@ export function Deliver({ onBack }: { onBack: () => void }) {
           <p className="text-lg">تستلم: <strong>{subject.quantity} {station.unit}</strong></p>
           {subject.via === 'OFFLINE' && <p className="mt-1 text-sm font-semibold text-warn-ink">الجهاز منقطع: حُكم بالبيان المحمَّل.</p>}
         </div>
+        {subject.photoUrl && (
+          <figure className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3">
+            <img src={subject.photoUrl} alt={`صورة ${subject.headName}`} className="size-24 flex-none rounded-xl object-cover" />
+            <figcaption className="text-sm text-muted">صورة رب الأسرة من ملفه. طابق بها وجه الحاضر.</figcaption>
+          </figure>
+        )}
         {subject.note && <Notice tone="warn">{subject.note}</Notice>}
         {step.error && <Notice>{step.error}</Notice>}
         {step.retry ? <Button disabled={step.busy} onClick={() => void confirm(subject, opId, step.retry!)}>أعد المحاولة</Button> : (

@@ -331,3 +331,28 @@ describe('التسليم دون اتصال', () => {
     expect(n.rows[0].n).toBeGreaterThanOrEqual(delivered.rows[0].n);
   });
 });
+
+describe('صورة رب الأسرة عند الشبّاك', () => {
+  it('إن رُفعت صورته الشخصية عادت مع التحقق برابط مؤقت يفتحها، والاطلاع يُسجَّل', async () => {
+    const f = await approvedFamily();
+    const camp = await activeCampaign('حملة الصورة');
+    const tok = camp.toks.find((t: any) => t.familyNo === f.familyNo);
+    const check = () => post('/deliveries/check', 'distributor', { pointId: p1, deviceId: 'd1', locate: { token: tok.token } });
+    expect((await check()).body.headPhotoUrl).toBeNull();
+
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('JFIF-head-photo-0123456789')]);
+    // صورة غير مربوطة برب الأسرة، ووثيقة هوية له: لا تُعرضان.
+    await api().post(`/api/families/${f.id}/attachments`).set(as('researcher')).field('category', 'PHOTO').attach('file', jpeg, 'house.jpg');
+    await api().post(`/api/families/${f.id}/attachments`).set(as('researcher')).field('category', 'IDENTITY').field('personId', f.members[0].id).attach('file', jpeg, 'id.jpg');
+    expect((await check()).body.headPhotoUrl).toBeNull();
+    await api().post(`/api/families/${f.id}/attachments`).set(as('researcher')).field('category', 'PHOTO').field('personId', f.members[0].id).attach('file', jpeg, 'face.jpg');
+
+    const before = (await sql("select count(*)::int as n from audit_log where action = 'attachment.view'")).rows[0].n;
+    const res = await check();
+    expect(res.body.headPhotoUrl).toMatch(/^\/api\/files\//);
+    const img = await api().get(res.body.headPhotoUrl);
+    expect(img.status).toBe(200);
+    expect(img.headers['content-type']).toContain('image/jpeg');
+    expect((await sql("select count(*)::int as n from audit_log where action = 'attachment.view'")).rows[0].n).toBe(before + 1);
+  });
+});

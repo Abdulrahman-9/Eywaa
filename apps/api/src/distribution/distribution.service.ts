@@ -407,7 +407,19 @@ export class DistributionService {
       entitlementId: row.id, familyId: row.family_id, familyNo: row.family_no, headName: row.head_name, quantity: row.quantity, unit: row.unit,
       campaignId: row.campaign_id, campaignName: row.campaign_name, assignedPoint: row.assigned_point_name, atAssignedPoint: row.point_id === input.pointId,
       receivers: await this.receivers(row.family_id, row.head_name),
+      headPhotoUrl: await this.headPhoto(row.family_id, actor),
     };
+  }
+
+  /**
+   * صورة رب الأسرة الشخصية إن رُفعت في ملفه، برابط مؤقت، ليطابق الموظف الوجه بالصورة.
+   * الاطلاع يُسجَّل باسم الموظف كأي اطلاع على مرفق.
+   */
+  private async headPhoto(familyId: string, actor: AuthUser): Promise<string | null> {
+    const { rows } = await this.db.query(
+      `select a.id from attachments a join persons h on h.id = a.person_id and h.relation = 'HEAD'
+       where a.family_id = $1 and a.category = 'PHOTO' and a.deleted_at is null and a.mime like 'image/%' order by a.created_at desc limit 1`, [familyId]);
+    return rows[0] ? (await this.attachments.issueLink(rows[0].id, actor)).url : null;
   }
 
   /** التسليم والجهاز متصل: يُقبل الرمز في أي نقطة، ويُبطَل في الجميع لحظتها. */

@@ -6,7 +6,7 @@ import { formatDateTime } from '../lib/format';
 import type { Point } from './Campaigns';
 
 interface Receiver { kind: 'HEAD' | 'PROXY'; proxyId?: string; name: string; relation?: string | null }
-interface Checked { entitlementId: string; familyNo: string; headName: string; quantity: number; unit: string; campaignName: string; assignedPoint: string; atAssignedPoint: boolean; receivers: Receiver[] }
+interface Checked { entitlementId: string; familyNo: string; headName: string; quantity: number; unit: string; campaignName: string; assignedPoint: string; atAssignedPoint: boolean; receivers: Receiver[]; headPhotoUrl: string | null }
 interface Delivered { entitlementId: string; familyNo: string; quantity: number; unit: string; receiverName: string; deliveredAt: string; point: string }
 type Locate = { token: string } | { campaignId: string; familyNo: string; code: string };
 
@@ -112,6 +112,12 @@ export function Desk() {
         <Card className="flex flex-col gap-4">
           <div className="rounded-lg bg-brand p-4 text-white"><span className="font-semibold">الرمز صحيح</span><div className="text-2xl font-bold">العائلة {info.familyNo}</div></div>
           <div><span className="text-muted">تستحق</span><div className="text-3xl font-bold">{info.quantity} {info.unit}</div></div>
+          {info.headPhotoUrl && (
+            <figure className="flex items-center gap-4 rounded-lg border border-line p-3">
+              <img src={info.headPhotoUrl} alt={`صورة ${info.headName}`} className="size-28 flex-none rounded-lg object-cover" />
+              <figcaption><strong>{info.headName}</strong><div className="text-muted">صورة رب الأسرة من ملفه. طابق بها وجه الحاضر إن قال إنه هو.</div></figcaption>
+            </figure>
+          )}
           {!info.atAssignedPoint && <Alert tone="warn">هذه العائلة معيَّنة لنقطة <strong>{info.assignedPoint}</strong>. يجوز تسليمها هنا لأن الجهاز متصل.</Alert>}
           <fieldset className="flex flex-col gap-2.5">
             <legend className="mb-1 text-lg font-bold">من الحاضر أمامك؟</legend>
