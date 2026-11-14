@@ -195,3 +195,23 @@ describe('ترحيل الوثائق المحفوظة بالمفتاح القدي
     expect((await get('/audit/verify', 'auditor')).body.ok).toBe(true);
   });
 });
+
+describe('مطابقة الأسماء', () => {
+  it('الاسم الرباعي المطابق شبهة بذاته، ولو اختلفت الوثيقة والهاتف وغاب اسم الأم', async () => {
+    const mk = (fullName: string) => { const f = family(); f.phone1 = `0773${String(3000000 + ++seq)}`; Object.assign(f.members[0], { fullName, motherName: undefined, birthDate: undefined }); return create(f); };
+    expect((await mk('عبد الستار جليل نوري الخزرجي')).body.status).toBe('PENDING_APPROVAL');
+    // كتابة أخرى للاسم نفسه: همزة وتاء مربوطة ومسافة في «عبد».
+    const same = await mk('عبدالستار جليل نوري الخزرجى');
+    expect(same.body.status).toBe('PENDING_DEDUPE_REVIEW');
+    expect(same.body.duplicateFlags[0].reason).toBe('تشابه الاسم مع تطابق: الاسم الرباعي كاملاً');
+    // الاسم نفسه واسم الأم معلوم عند الاثنين ومختلف: شخصان، فلا شبهة.
+    const withMother = (mother: string) => { const f = family(); f.phone1 = `0773${String(3000000 + ++seq)}`; Object.assign(f.members[0], { fullName: 'صباح نوري حسن الدوري', motherName: mother, birthDate: undefined }); return create(f); };
+    expect((await withMother('فخرية جاسم')).body.status).toBe('PENDING_APPROVAL');
+    expect((await withMother('سهام عبد الله')).body.status).toBe('PENDING_APPROVAL');
+    // ثلاثي فقط: لا يكفي وحده، فالأسماء الثلاثية تتكرر.
+    expect((await mk('كرار حيدر عباس')).body.status).toBe('PENDING_APPROVAL');
+    expect((await mk('كرار حيدر عباس')).body.status).toBe('PENDING_APPROVAL');
+    // رباعي يختلف في مقطع: شخص آخر.
+    expect((await mk('عبد الستار جليل نوري العبيدي')).body.status).toBe('PENDING_APPROVAL');
+  });
+});

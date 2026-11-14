@@ -18,6 +18,9 @@ const MOTHER_SIMILARITY = 0.7;
 /** حدّ الاسم «شبه المطابق» الذي يكفي معه تطابق تاريخ الميلاد باليوم. */
 const NEAR_EXACT_NAME = 0.85;
 const MAX_FLAGS_PER_PERSON = 5;
+/** الاسم من أربعة مقاطع فأكثر (رباعي، أو ثلاثي ولقب) إن طابق اسماً مسجَّلاً فهو شبهة بذاته. */
+const FULL_NAME_PARTS = 4;
+const FULL_NAME_MATCH = 0.97;
 /** الرقم نفسه بسجل آخر قرينة قوية بذاتها، فيكفي معها تشابه اسم أدنى مما يُطلب في التشابه العام. */
 const SAME_NUMBER_NAME_SIMILARITY = 0.4;
 
@@ -269,7 +272,7 @@ export class FamiliesService implements OnModuleInit {
   }
 
   /**
-   * التشابه الترجيحي: اسم كامل متقارب واسم أول متقارب، ومعهما قرينة قوية واحدة على الأقل:
+   * التشابه الترجيحي: اسم رباعي مطابق (وحده يكفي)، أو اسم كامل متقارب واسم أول متقارب ومعهما قرينة قوية واحدة على الأقل:
    * اسم الأم، أو هاتف العائلة، أو تاريخ الميلاد باليوم مع اسم شبه مطابق.
    * سنة الميلاد وحدها ليست قرينة: الأسماء الشائعة تتطابق فيها كثيراً فتغرق المراجعين بالشبهات.
    * يُعلَّق السجل ولا يُمنع.
@@ -291,19 +294,23 @@ export class FamiliesService implements OnModuleInit {
                   (p.birth_date is not null and p.birth_date = $3::date) as same_birth_date,
                   (p.mother_norm is not null and $4::text is not null
                      and similarity(p.mother_norm, $4) >= $6) as same_mother,
-                  (f.phone1 = any($5::text[]) or f.phone2 = any($5::text[])) as same_phone
+                  (f.phone1 = any($5::text[]) or f.phone2 = any($5::text[])) as same_phone,
+                  -- اسم الأم معلوم عند الاثنين ومختلف: قرينة أنهما شخصان، فلا يكفي معها تطابق الاسم وحده.
+                  (p.mother_norm is not null and $4::text is not null and similarity(p.mother_norm, $4) < $6) as mother_differs
            from persons p join families f on f.id = p.family_id
            where p.name_norm % $1
              and p.family_id <> $2 and f.status <> 'REJECTED'
              and similarity(split_part(p.name_norm, ' ', 1), split_part($1, ' ', 1)) >= $7
          ) m
-         where same_mother or same_phone or (same_birth_date and score >= $8)
+         where same_mother or same_phone or (same_birth_date and score >= $8) or ($10 and score >= $11 and not mother_differs)
          order by score desc limit $9`,
         [nameNorm, familyId, m.birthDate ?? null, motherNorm, phones, MOTHER_SIMILARITY, FIRST_NAME_SIMILARITY,
-         NEAR_EXACT_NAME, MAX_FLAGS_PER_PERSON],
+         NEAR_EXACT_NAME, MAX_FLAGS_PER_PERSON, nameNorm.split(' ').length >= FULL_NAME_PARTS, FULL_NAME_MATCH],
       );
       for (const r of rows) {
         const reasons = [r.same_mother && 'اسم الأم', r.same_phone && 'الهاتف', r.same_birth_date && 'تاريخ الميلاد'].filter(Boolean);
+        // الاسم الرباعي الكامل شبه فريد: تطابقه وحده يكفي للشبهة، بلا قرينة أخرى.
+        if (!reasons.length) reasons.push('الاسم الرباعي كاملاً');
         await c.query(
           `insert into duplicate_flags (family_id, person_id, matched_person_id, matched_family_id, reason, score)
            values ($1,$2,$3,$4,$5,$6)`,
