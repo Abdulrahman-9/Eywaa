@@ -66,6 +66,17 @@ export class AuthGuard implements CanActivate {
     if (!rows[0]) throw new UnauthorizedException('الحساب معطَّل أو غير موجود');
     req.user = rows[0] as AuthUser;
 
+    // طلبات تطبيق الميدان تحمل معرّف جهازها. الجهاز المسحوب يُرفض، والتطبيق يمحو ما عليه حين يبلغه الرفض.
+    const deviceId: unknown = req.headers['x-device-id'];
+    if (typeof deviceId === 'string' && /^[0-9a-f-]{36}$/i.test(deviceId)) {
+      const d = await this.db.query('select revoked_at, last_seen_at from devices where id = $1', [deviceId]);
+      if (d.rows[0]?.revoked_at) throw new ForbiddenException({ message: 'سُحب هذا الجهاز من النظام', code: 'DEVICE_REVOKED' });
+      // «آخر ظهور» يُحدَّث كل خمس دقائق على الأكثر، فلا يكتب كل طلب في القاعدة.
+      if (d.rows[0] && Date.now() - new Date(d.rows[0].last_seen_at).getTime() > 300_000) {
+        await this.db.query('update devices set last_seen_at = now() where id = $1', [deviceId]);
+      }
+    }
+
     const allowed = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, targets);
     if (!allowed || !allowed.includes(req.user.role)) {
       throw new ForbiddenException('لا صلاحية لك في هذه العملية');

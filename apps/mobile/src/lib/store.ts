@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { ApiError, api } from './api';
+import { ApiError, api, setDevice } from './api';
 import type { Manifest } from './offline';
 import { vault, type Meta } from './vault';
 
@@ -21,10 +21,10 @@ export interface Registration {
 }
 interface Data { token: string | null; user: User | null; station: Station | null; deliveries: Delivery[]; registrations: Registration[] }
 
-export interface AppState extends Data { meta: Meta | null; unlocked: boolean; manifest: Manifest | null; online: boolean; syncing: boolean; lastSync: string | null; needLogin: boolean }
+export interface AppState extends Data { meta: Meta | null; unlocked: boolean; manifest: Manifest | null; online: boolean; syncing: boolean; lastSync: string | null; needLogin: boolean; revoked: boolean }
 
 const EMPTY: Data = { token: null, user: null, station: null, deliveries: [], registrations: [] };
-let state: AppState = { ...EMPTY, meta: null, unlocked: false, manifest: null, online: navigator.onLine, syncing: false, lastSync: null, needLogin: false };
+let state: AppState = { ...EMPTY, meta: null, unlocked: false, manifest: null, online: navigator.onLine, syncing: false, lastSync: null, needLogin: false, revoked: false };
 const listeners = new Set<() => void>();
 const set = (patch: Partial<AppState>) => { state = { ...state, ...patch }; listeners.forEach((l) => l()); };
 export const getState = () => state;
@@ -41,7 +41,9 @@ export const app = {
   async boot() {
     // يُطلب من المتصفح ألا يمحو مخزن التطبيق إن ضاق القرص: فيه تسليمات لم تُرفع.
     void navigator.storage?.persist?.().catch(() => false);
-    set({ meta: (await vault.meta()) ?? null });
+    const meta = (await vault.meta()) ?? null;
+    setDevice(meta?.deviceId ?? null, () => void app.wipe(true));
+    set({ meta });
   },
 
   /** الدخول يحتاج اتصالاً. يعيد المستخدم ورمز الجلسة دون أن يحفظ شيئاً: الحفظ بعد وضع رمز القفل. */
@@ -53,8 +55,10 @@ export const app = {
 
   async setup(pin: string, session: { token: string; user: User }) {
     const meta = await vault.create(pin, { username: session.user.username, fullName: session.user.fullName });
-    set({ meta, unlocked: true, manifest: null, needLogin: false });
+    setDevice(meta.deviceId);
+    set({ meta, unlocked: true, manifest: null, needLogin: false, revoked: false });
     await save({ ...EMPTY, token: session.token, user: session.user });
+    await app.registerDevice();
   },
 
   async unlock(pin: string) {
@@ -70,9 +74,18 @@ export const app = {
     set({ ...EMPTY, manifest: null, unlocked: false });
   },
 
-  async wipe() {
+  /** يمحو كل ما على الجهاز. revoked: المحو جاء بأمر الخادم لأن الجهاز سُحب. */
+  async wipe(revoked = false) {
     await vault.wipe();
-    set({ ...EMPTY, meta: null, manifest: null, unlocked: false, needLogin: false });
+    setDevice(null);
+    set({ ...EMPTY, meta: null, manifest: null, unlocked: false, needLogin: false, revoked });
+  },
+
+  /** يسجّل الجهاز في الخادم باسم موظفه ليظهر للمدير ويُسحب إن ضاع. إخفاقه لا يعطّل العمل؛ يُعاد عند كل مزامنة. */
+  async registerDevice() {
+    if (!state.meta || !state.token) return;
+    const ua = /\(([^)]+)\)/.exec(navigator.userAgent)?.[1] ?? navigator.userAgent;
+    await api('/devices', { token: state.token, body: { deviceId: state.meta.deviceId, label: ua.slice(0, 100) } }).catch(() => {});
   },
 
   /** تجديد الجلسة بعد انتهائها (12 ساعة) دون مسّ ما على الجهاز. */
@@ -120,6 +133,8 @@ export const app = {
     set({ syncing: true });
     try {
       const token = state.token;
+      await app.registerDevice();
+      if (!state.unlocked) return { ok: false, message: 'سُحب هذا الجهاز من النظام' };
       for (;;) {
         const batch = state.deliveries.filter((d) => d.sync === 'PENDING').slice(0, 200);
         if (!batch.length || !state.station) break;
@@ -185,6 +200,7 @@ export const app = {
       set({ lastSync: new Date().toISOString(), online: true });
       return { ok: true, message: 'تمّت المزامنة' };
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'DEVICE_REVOKED') return { ok: false, message: 'سُحب هذا الجهاز من النظام' };
       if (err instanceof ApiError && err.status === 401) { set({ needLogin: true }); return { ok: false, message: 'انتهت الجلسة. ادخل بكلمة مرورك لتُكمل المزامنة.' }; }
       if (err instanceof ApiError && err.offline) { set({ online: false }); return { ok: false, message: 'لا اتصال. ما على الجهاز محفوظ، ويُرفع حين يعود الاتصال.' }; }
       return { ok: false, message: err instanceof Error ? err.message : 'تعذّرت المزامنة' };

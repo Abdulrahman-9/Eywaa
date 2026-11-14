@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, HttpException, Inject, Post, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, HttpCode, HttpException, Inject, Post, UnauthorizedException } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { AuditService } from '../audit/audit.service';
@@ -32,7 +32,11 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(200)
-  async login(@Body(new ZodPipe(loginSchema)) body: z.infer<typeof loginSchema>) {
+  async login(@Body(new ZodPipe(loginSchema)) body: z.infer<typeof loginSchema>, @Headers('x-device-id') deviceId?: string) {
+    if (deviceId && /^[0-9a-f-]{36}$/i.test(deviceId)) {
+      const d = await this.db.query('select 1 from devices where id = $1 and revoked_at is not null', [deviceId]);
+      if (d.rows[0]) throw new ForbiddenException({ message: 'سُحب هذا الجهاز من النظام', code: 'DEVICE_REVOKED' });
+    }
     const { rows } = await this.db.query(
       `select id, username, full_name, role, password_hash, failed_logins, locked_until, must_change_password,
               totp_enabled, totp_secret_enc, totp_last_step

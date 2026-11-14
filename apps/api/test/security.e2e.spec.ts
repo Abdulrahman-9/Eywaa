@@ -39,6 +39,47 @@ describe('رموز التحقق الزمنية', () => {
   });
 });
 
+describe('أجهزة الميدان وسحبها', () => {
+  const device = '0b6f1d2e-7a3c-4e55-9c1a-2f4d8e6b7a10';
+  const withDevice = (user: string) => ({ ...as(user), 'X-Device-Id': device });
+
+  it('الجهاز يُسجَّل باسم موظفه، وإعادة تسجيله لا تكرّره', async () => {
+    const reg = () => api().post('/api/devices').set(as('researcher')).send({ deviceId: device, label: 'Pixel 7 · Chrome' });
+    expect((await reg()).body).toEqual({ registered: true });
+    expect((await reg()).status).toBe(200);
+    expect((await api().post('/api/devices').set(as('researcher')).send({ deviceId: 'not-a-uuid', label: 'x' })).status).toBe(400);
+    const list = await api().get('/api/devices').set(as('admin'));
+    expect(list.body).toHaveLength(1);
+    expect(list.body[0]).toMatchObject({ id: device, username: 'researcher', label: 'Pixel 7 · Chrome', revokedAt: null });
+    expect((await api().get('/api/devices').set(as('researcher'))).status).toBe(403);
+  });
+
+  it('المدير وحده يسحبه بسبب، وبعدها يُرفض كل طلب منه ولو كانت جلسته صحيحة', async () => {
+    expect((await api().get('/api/families').set(withDevice('researcher'))).status).toBe(200);
+    expect((await api().post(`/api/devices/${device}/revoke`).set(as('auditor')).send({ note: 'ضاع' })).status).toBe(403);
+    expect((await api().post(`/api/devices/${device}/revoke`).set(as('admin')).send({})).status).toBe(400);
+    expect((await api().post(`/api/devices/${device}/revoke`).set(as('admin')).send({ note: 'ضاع الهاتف في السوق' })).body).toEqual({ revoked: true });
+    expect((await api().post(`/api/devices/${device}/revoke`).set(as('admin')).send({ note: 'مرة ثانية' })).status).toBe(404);
+
+    const refused = await api().get('/api/families').set(withDevice('researcher'));
+    expect(refused.status).toBe(403);
+    expect(refused.body.code).toBe('DEVICE_REVOKED');
+    // الجلسة نفسها من غير ذلك الجهاز تعمل: السحب للجهاز لا للحساب.
+    expect((await api().get('/api/families').set(as('researcher'))).status).toBe(200);
+  });
+
+  it('الجهاز المسحوب لا يدخل منه أحد ولا يُسجَّل من جديد، والسحب في سجل التدقيق', async () => {
+    const login = await api().post('/api/auth/login').set('X-Device-Id', device).send({ username: 'researcher', password: PASSWORD });
+    expect(login.status).toBe(403);
+    expect(login.body.code).toBe('DEVICE_REVOKED');
+    const again = await api().post('/api/devices').set(as('researcher')).send({ deviceId: device, label: 'x' });
+    expect(again.body.code).toBe('DEVICE_REVOKED');
+    const log = await sql("select payload from audit_log where action = 'device.revoke'");
+    expect(log.rows[0].payload).toMatchObject({ note: 'ضاع الهاتف في السوق' });
+    expect((await api().get('/api/devices').set(as('auditor'))).body[0]).toMatchObject({ revokedBy: 'admin', revokeNote: 'ضاع الهاتف في السوق' });
+  });
+});
+
 describe('الدخول', () => {
   it('المستخدم المجهول وكلمة المرور الخاطئة برسالة واحدة', async () => {
     const unknown = await signIn('nobody', 'whatever-password');

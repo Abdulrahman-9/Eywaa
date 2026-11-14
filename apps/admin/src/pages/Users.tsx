@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
+import { ReasonDialog } from '../components/ReasonDialog';
+import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Skeleton } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -67,6 +69,44 @@ function CreateUserDialog({ open, onClose }: { open: boolean; onClose: () => voi
         </div>
       </form>
     </Dialog>
+  );
+}
+
+interface Device { id: string; label: string; registeredAt: string; lastSeenAt: string; revokedAt: string | null; revokeNote: string | null; revokedBy: string | null; username: string; fullName: string }
+
+/** هواتف الميدان المسجَّلة. سحب الجهاز يرفض طلباته ويمحو ما عليه حين يتصل. */
+function Devices() {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [revoking, setRevoking] = useState<Device | null>(null);
+  const devices = useQuery({ queryKey: ['devices'], queryFn: () => api<Device[]>('/devices') });
+  const revoke = useMutation({
+    mutationFn: (note: string) => api(`/devices/${revoking!.id}/revoke`, { method: 'POST', body: { note } }),
+    onSuccess: () => { toast('سُحب الجهاز'); setRevoking(null); queryClient.invalidateQueries({ queryKey: ['devices'] }); },
+  });
+  return (
+    <Card className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-lg font-bold">أجهزة الميدان</h2>
+        <p className="text-sm text-muted">كل هاتف نُصّب عليه تطبيق الميدان. إن ضاع هاتف فاسحبه: تُرفض طلباته، ويمحو التطبيق ما عليه حين يتصل.</p>
+      </div>
+      {devices.error && <Alert>{devices.error.message}</Alert>}
+      {devices.data?.length === 0 && <p className="text-muted">لم يُنصَّب التطبيق على هاتف بعد.</p>}
+      {devices.data?.map((d) => (
+        <div key={d.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-line px-4 py-3">
+          <div className="flex min-w-0 flex-[1_1_18rem] flex-col">
+            <div className="flex flex-wrap items-center gap-2"><strong>{d.fullName}</strong><span dir="ltr" className="text-sm text-muted">{d.username}</span>{d.revokedAt && <Badge tone="danger">مسحوب</Badge>}</div>
+            <span dir="ltr" className="truncate text-end text-sm text-muted">{d.label}</span>
+            <span className="text-sm text-muted">{d.revokedAt ? `سحبه ${d.revokedBy} · ${formatDateTime(d.revokedAt)} · ${d.revokeNote}` : `آخر ظهور ${formatDateTime(d.lastSeenAt)}`}</span>
+          </div>
+          {!d.revokedAt && <Button variant="danger" onClick={() => setRevoking(d)}>اسحب الجهاز</Button>}
+        </div>
+      ))}
+      <ReasonDialog open={!!revoking} title={`سحب جهاز ${revoking?.fullName ?? ''}`} confirmLabel="اسحب الجهاز" danger pending={revoke.isPending} error={revoke.error?.message}
+        onClose={() => { revoke.reset(); setRevoking(null); }} onConfirm={(note) => revoke.mutate(note)}>
+        <p>يُمحى ما على الهاتف حين يتصل، <strong>ومنه ما لم يُرفع من تسليمات وتسجيلات</strong>. والهاتف الذي لا يتصل لا يبلغه السحب؛ فإن كان بيد من لا يؤتمن فعطّل حساب صاحبه أيضاً.</p>
+      </ReasonDialog>
+    </Card>
   );
 }
 
@@ -142,6 +182,7 @@ export function Users() {
       </Card>
 
       <CreateUserDialog open={creating} onClose={() => setCreating(false)} />
+      <Devices />
       <Dialog open={!!resetting} title={`كلمة المرور والدخول: ${resetting?.fullName ?? ''}`} onClose={() => { setResetting(null); setTemp(''); }}>
         <Field label="كلمة مرور مؤقتة" hint="12 خانة على الأقل. يُلزم صاحبها بتغييرها عند أول دخول.">
           {(id) => <Input id={id} dir="ltr" autoComplete="off" value={temp} onChange={(e) => setTemp(e.target.value)} />}

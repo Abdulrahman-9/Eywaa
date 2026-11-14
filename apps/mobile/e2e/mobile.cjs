@@ -291,6 +291,36 @@ async function deliver(page, { token, familyNo, code }, receiver) {
       await page.getByText('سلة الميدان').waitFor();
     });
 
+    await step('المدير يسحب الجهاز: يُرفض طلبه التالي، ويمحو التطبيق ما عليه', async () => {
+      const devices = await call('/devices', tokens.admin);
+      const mine = devices.find((d) => d.username === names.distributor);
+      assert.ok(mine && !mine.revokedAt, 'الجهاز مسجَّل باسم موظفه');
+      // على الجهاز تسليم لم يُرفع: يذهب مع المحو، وهذا ما يُنبَّه إليه المدير قبل السحب.
+      await context.setOffline(true);
+      await page.getByRole('button', { name: 'سلّم', exact: true }).click();
+      await deliver(page, { token: pool[17].token }, pool[17].headName);
+      await page.getByRole('button', { name: 'التالي' }).click();
+      await page.getByRole('button', { name: 'رجوع' }).click();
+      const before = (await detail()).totals.delivered;
+      const r = await call(`/devices/${mine.id}/revoke`, tokens.admin, { note: 'ضاع الهاتف' });
+      assert.equal(r.revoked, true);
+      await context.setOffline(false);
+      await page.getByText('سحب مدير النظام هذا الجهاز').waitFor({ timeout: 15000 });
+      await page.getByLabel('اسم المستخدم').waitFor();
+      const left = await page.evaluate(() => new Promise((resolve) => {
+        const req = indexedDB.open('eywaa-mobile');
+        req.onsuccess = () => { const all = req.result.transaction('kv').objectStore('kv').getAllKeys(); all.onsuccess = () => resolve(all.result.length); };
+      }));
+      assert.equal(left, 0, 'لم يبقَ في مخزن الجهاز شيء');
+      assert.equal((await detail()).totals.delivered, before, 'ما لم يُرفع لم يبلغ الخادم');
+      // ولا يُدخل منه بعدها.
+      await page.reload();
+      await page.getByLabel('اسم المستخدم').fill(names.distributor);
+      await page.getByLabel('كلمة المرور').fill(PASSWORD);
+      await page.getByRole('button', { name: 'دخول' }).click();
+      await page.getByRole('heading', { name: 'رمز قفل الجهاز' }).waitFor();
+    });
+
     // ---------- الباحث الميداني على جهاز آخر ----------
     const ctx2 = await browser.newContext({ ...devices['Pixel 7'], locale: 'ar-IQ', deviceScaleFactor: Number(process.env.DSF ?? 2), geolocation: { latitude: 33.3536, longitude: 43.7836 }, permissions: ['geolocation'] });
     const field = await ctx2.newPage();

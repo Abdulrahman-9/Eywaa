@@ -6,6 +6,11 @@ export class ApiError extends Error {
   get offline() { return this.status === 0; }
 }
 
+let deviceId: string | null = null;
+let onRevoked: () => void = () => {};
+/** كل طلب من التطبيق يحمل معرّف جهازه، ليُرفض إن سُحب الجهاز. */
+export const setDevice = (id: string | null, revoked?: () => void) => { deviceId = id; if (revoked) onRevoked = revoked; };
+
 export async function api<T>(path: string, init: { method?: string; body?: unknown; form?: FormData; token?: string | null; timeoutMs?: number } = {}): Promise<T> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), init.timeoutMs ?? 10_000);
@@ -13,7 +18,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   try {
     res = await fetch(`/api${path}`, {
       method: init.method ?? (init.body !== undefined || init.form ? 'POST' : 'GET'),
-      headers: { ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}) },
+      headers: { ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}), ...(deviceId ? { 'X-Device-Id': deviceId } : {}) },
       body: init.form ?? (init.body !== undefined ? JSON.stringify(init.body) : undefined),
       signal: ctl.signal,
       cache: 'no-store',
@@ -26,6 +31,8 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   const data = await res.json().catch(() => null);
   // بوّابة أو شبكة أسيرة تجيب بغير ما يجيب به الخادم: تُعامل كانقطاع.
   if (res.status >= 502 && res.status <= 504) throw new ApiError(0, 'لا اتصال بالخادم');
+  // الجهاز سُحب من النظام: يُمحى ما عليه قبل أي شيء آخر.
+  if (res.status === 403 && data?.code === 'DEVICE_REVOKED') onRevoked();
   if (!res.ok) throw new ApiError(res.status, (data && typeof data.message === 'string' && data.message) || 'حدث خطأ غير متوقع', data?.code, data?.details ?? data);
   return data as T;
 }

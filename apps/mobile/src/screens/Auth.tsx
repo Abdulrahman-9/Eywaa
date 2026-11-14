@@ -47,6 +47,7 @@ function PinPad({ label, hint, onSubmit, busy, error }: { label: string; hint?: 
 
 /** أول استعمال للجهاز: دخول بالحساب، ثم رمز قفل تُشفَّر به بيانات الجهاز. */
 export function FirstRun() {
+  const { revoked } = useApp();
   const [session, setSession] = useState<{ token: string; user: User } | null>(null);
   const [first, setFirst] = useState('');
   const [error, setError] = useState('');
@@ -54,6 +55,7 @@ export function FirstRun() {
   if (!session) {
     return (
       <Screen title="إيواء — الميدان">
+        {revoked && <Notice>سحب مدير النظام هذا الجهاز، فمُحي ما كان عليه. راجعه إن كان ذلك خطأ.</Notice>}
         <p className="text-muted">ادخل بحسابك مرة واحدة والجهاز متصل. بعدها يعمل التطبيق ولو انقطع الاتصال.</p>
         <Credentials submitLabel="دخول" onDone={async (u, p, c) => setSession(await app.signIn(u, p, c))} />
       </Screen>

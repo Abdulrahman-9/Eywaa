@@ -36,12 +36,13 @@ import { ScoringService } from './scoring/scoring.service';
 import { SettingsController } from './settings/settings.controller';
 import { SettingsService } from './settings/settings.service';
 import { StatsController } from './stats/stats.controller';
+import { DevicesController } from './users/devices.controller';
 import { UsersController } from './users/users.controller';
 
 @Module({
   imports: [DbModule],
   controllers: [
-    AuthController, UsersController, AuditController, SettingsController, StatsController,
+    AuthController, UsersController, DevicesController, AuditController, SettingsController, StatsController,
     FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController, PayoutsController,
   ],
   providers: [
