@@ -1,12 +1,13 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { randomInt } from 'crypto';
+import { BadRequestException, ConflictException, ForbiddenException, GoneException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { randomInt, timingSafeEqual } from 'crypto';
+import * as QRCode from 'qrcode';
 import { PoolClient } from 'pg';
 import { z } from 'zod';
 import { AccountingService } from '../accounting/accounting.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
-import { toAsciiDigits } from '../common/arabic';
+import { normalizeName, toAsciiDigits } from '../common/arabic';
 import { FieldCrypto } from '../common/crypto';
 import { Config } from '../config';
 import { CONFIG, Db } from '../db/db.module';
@@ -25,8 +26,43 @@ export const campaignSchema = z.object({
   pointIds: z.array(z.string().uuid()).min(1).max(50),
   /** الصندوق الذي تُصرف منه الحملة المالية. */
   fundId: z.string().uuid().optional(),
+  selection: z.lazy(() => selectionSchema).optional(),
 }).refine((c) => c.endsOn >= c.startsOn, 'تاريخ النهاية قبل البداية');
 export type CampaignInput = z.infer<typeof campaignSchema>;
+
+const familyNos = z.array(z.string().trim().regex(/^\d{5,12}$/)).max(5000).default([]);
+/**
+ * اختيار عوائل الحملة من مستحقي برنامجها: تصفية، ثم ترتيب، ثم سقف، ثم ما يُضاف ويُستثنى باليد.
+ * الشروط كلها تضيّق؛ فلا يدخل الحملةَ من لا يستحق البرنامج، ولو أُضيف باليد.
+ */
+export const selectionSchema = z.object({
+  classes: z.array(z.enum(['A', 'B', 'C', 'D'])).min(1).optional(),
+  minPoints: z.number().int().min(0).max(1000).optional(),
+  maxPoints: z.number().int().min(0).max(1000).optional(),
+  registeredFrom: date.optional(),
+  registeredTo: date.optional(),
+  membersMin: z.number().int().min(1).max(50).optional(),
+  membersMax: z.number().int().min(1).max(50).optional(),
+  tagsAny: z.array(z.enum(['ORPHANS', 'WIDOW', 'DISABLED', 'SICK', 'DIVORCED', 'NEEDY', 'UNMARRIED'])).min(1).optional(),
+  mahallas: z.array(z.string().trim().min(1)).min(1).max(100).optional(),
+  /** الأَولى فالأَولى: حين يضيق السقف يدخل من تقدّم في هذا الترتيب. */
+  order: z.enum(['POINTS', 'OLDEST', 'NEWEST', 'MEMBERS', 'FAMILY_NO']).default('FAMILY_NO'),
+  /** أقصى عدد العوائل. */
+  limit: z.number().int().min(1).max(100000).optional(),
+  /** أقصى مجموع المقادير (ما في المخزن أو الصندوق). */
+  maxQuantity: z.number().int().min(1).optional(),
+  include: familyNos,
+  exclude: familyNos,
+  /** لا تصفية آلية: الحملة ممن أُضيفوا باليد وحدهم. */
+  manualOnly: z.boolean().default(false),
+}).strict();
+export type Selection = z.infer<typeof selectionSchema>;
+export const previewSchema = z.object({ programId: z.string().uuid(), selection: selectionSchema.default({} as any) });
+export const listFamiliesSchema = z.object({
+  q: z.string().trim().optional(), status: z.enum(['PENDING', 'DELIVERED', 'CANCELLED']).optional(), pointId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100), offset: z.coerce.number().int().min(0).default(0),
+});
+interface Candidate { familyId: string; familyNo: string; headName: string; members: number; quantity: number; points: number | null; class: string | null; registeredAt: string; mahalla: string | null; manual?: boolean }
 
 const locator = z.union([
   z.object({ token: z.string().min(10).max(1000) }),
@@ -137,23 +173,16 @@ export class DistributionService {
     const points = await this.db.query('select id from distribution_points where id = any($1) and active', [input.pointIds]);
     if (points.rowCount !== new Set(input.pointIds).size) throw new BadRequestException('في النقاط المختارة نقطة غير موجودة أو معطَّلة');
 
-    const eligible = await this.programs.eligible(program);
-    // يُستثنى من استلم من البرنامج نفسه قريباً، ومن له استحقاق قائم في حملة أخرى للبرنامج.
-    const busy = await this.db.query(
-      `select distinct e.family_id from entitlements e join campaigns c on c.id = e.campaign_id
-       where c.program_id = $1 and (
-         (e.status = 'DELIVERED' and e.delivered_at > now() - make_interval(days => $2))
-         or (e.status = 'PENDING' and c.status in ('DRAFT', 'PENDING_APPROVAL', 'ACTIVE')))`,
-      [program.id, program.minGapDays],
-    );
-    const skip = new Set(busy.rows.map((r) => r.family_id));
-    const list = eligible.filter((e) => !skip.has(e.familyId));
-    if (!list.length) throw new ConflictException('لا عائلة تستحق هذا البرنامج الآن');
+    const selection = selectionSchema.parse(input.selection ?? {});
+    const picked = await this.select(program, selection);
+    if (picked.rejected.length) throw new BadRequestException({ message: `لا تدخل الحملةَ هذه العوائل المضافة باليد: ${picked.rejected.slice(0, 8).map((r) => `${r.familyNo} (${r.reason})`).join('، ')}`, rejected: picked.rejected });
+    const list = picked.chosen;
+    if (!list.length) throw new ConflictException(picked.funnel.available ? 'لا عائلة تطابق هذا الاختيار. وسّع التصفية.' : 'لا عائلة تستحق هذا البرنامج الآن');
 
     const id = await this.db.tx(async (c) => {
       const { rows } = await c.query(
-        'insert into campaigns (name, program_id, unit, starts_on, ends_on, created_by, fund_id) values ($1,$2,$3,$4,$5,$6,$7) returning id',
-        [input.name, program.id, program.unit, input.startsOn, input.endsOn, actor.id, input.fundId ?? null],
+        'insert into campaigns (name, program_id, unit, starts_on, ends_on, created_by, fund_id, selection) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id',
+        [input.name, program.id, program.unit, input.startsOn, input.endsOn, actor.id, input.fundId ?? null, JSON.stringify(selection)],
       );
       await c.query(
         `insert into entitlements (campaign_id, family_id, point_id, serial, quantity)
@@ -163,27 +192,205 @@ export class DistributionService {
       );
       await this.audit.append(c, {
         actorId: actor.id, action: 'campaign.create', entity: 'campaign', entityId: rows[0].id,
-        payload: { name: input.name, program: program.name, families: list.length, quantity: list.reduce((s, e) => s + e.quantity, 0), excluded: eligible.length - list.length },
+        payload: { name: input.name, program: program.name, families: list.length, quantity: list.reduce((s, e) => s + e.quantity, 0), funnel: picked.funnel, selection },
       });
       return rows[0].id as string;
     });
     return this.detail(id);
   }
 
+  /** مستحقو البرنامج المتاحون لحملة جديدة: من يستحقه الآن، ناقصاً من استلم منه قريباً أو له فيه استحقاق قائم. */
+  private async available(program: { id: string; minGapDays: number; rules: any; amount: any }, exceptCampaign?: string) {
+    const eligible = await this.programs.eligible(program);
+    const busy = await this.db.query(
+      `select distinct e.family_id from entitlements e join campaigns c on c.id = e.campaign_id
+       where c.program_id = $1 and ($3::uuid is null or c.id <> $3) and (
+         (e.status = 'DELIVERED' and e.delivered_at > now() - make_interval(days => $2))
+         or (e.status = 'PENDING' and c.status in ('DRAFT', 'PENDING_APPROVAL', 'ACTIVE')))`,
+      [program.id, program.minGapDays, exceptCampaign ?? null],
+    );
+    const skip = new Set(busy.rows.map((r) => r.family_id));
+    const free = eligible.filter((e) => !skip.has(e.familyId));
+    const extra = await this.db.query(
+      'select f.id, f.created_at, f.mahalla, sc.points, sc.class from families f left join family_scores sc on sc.family_id = f.id where f.id = any($1)', [free.map((e) => e.familyId)]);
+    const by = new Map(extra.rows.map((r) => [r.id, r]));
+    const rows: Candidate[] = free.map((e) => {
+      const x = by.get(e.familyId);
+      return { ...e, points: x?.points ?? null, class: x?.class ?? null, registeredAt: new Date(x.created_at).toISOString(), mahalla: x?.mahalla ?? null };
+    });
+    return { rows, eligible: eligible.length, busy: new Set(eligible.filter((e) => skip.has(e.familyId)).map((e) => e.familyNo)) };
+  }
+
+  /** يطبّق الاختيار ويعيد المختارين بترتيبهم، وعدد من بقي بعد كل خطوة. */
+  private async select(program: { id: string; minGapDays: number; rules: any; amount: any }, sel: Selection) {
+    const { rows: free, eligible, busy } = await this.available(program);
+    const day = (iso: string) => iso.slice(0, 10);
+    const matches = (c: Candidate) =>
+      (!sel.classes || (!!c.class && (sel.classes as string[]).includes(c.class)))
+      && (sel.minPoints === undefined || (c.points ?? -1) >= sel.minPoints)
+      && (sel.maxPoints === undefined || (c.points ?? Infinity) <= sel.maxPoints)
+      && (!sel.registeredFrom || day(c.registeredAt) >= sel.registeredFrom)
+      && (!sel.registeredTo || day(c.registeredAt) <= sel.registeredTo)
+      && (sel.membersMin === undefined || c.members >= sel.membersMin)
+      && (sel.membersMax === undefined || c.members <= sel.membersMax)
+      && (!sel.mahallas || (!!c.mahalla && sel.mahallas.includes(c.mahalla)));
+    let pool = sel.manualOnly ? [] : free.filter(matches);
+    if (sel.tagsAny && pool.length) {
+      const t = await this.db.query('select id from families where id = any($1) and tags::text[] && $2', [pool.map((c) => c.familyId), sel.tagsAny]);
+      const ok = new Set(t.rows.map((r) => r.id));
+      pool = pool.filter((c) => ok.has(c.familyId));
+    }
+    const filtered = pool.length;
+    const cmp: Record<Selection['order'], (a: Candidate, b: Candidate) => number> = {
+      POINTS: (a, b) => (b.points ?? -1) - (a.points ?? -1),
+      OLDEST: (a, b) => a.registeredAt.localeCompare(b.registeredAt),
+      NEWEST: (a, b) => b.registeredAt.localeCompare(a.registeredAt),
+      MEMBERS: (a, b) => b.members - a.members,
+      FAMILY_NO: () => 0,
+    };
+    // التساوي يُحسم برقم العائلة، فالترتيب ثابت لا يتبدّل بين المعاينة والإنشاء.
+    pool.sort((a, b) => cmp[sel.order](a, b) || a.familyNo.localeCompare(b.familyNo));
+    const out = new Set(sel.exclude);
+    pool = pool.filter((c) => !out.has(c.familyNo));
+    const afterExclude = pool.length;
+    if (sel.limit !== undefined) pool = pool.slice(0, sel.limit);
+    if (sel.maxQuantity !== undefined) {
+      let sum = 0;
+      const kept: Candidate[] = [];
+      // بالترتيب حتى يمتلئ السقف: من لا يسعه الباقي يقف عنده الاختيار، فلا يُتخطّى أَولى إلى من دونه.
+      for (const c of pool) { if (sum + c.quantity > sel.maxQuantity) break; sum += c.quantity; kept.push(c); }
+      pool = kept;
+    }
+    const capped = pool.length;
+    const chosen = [...pool];
+    const have = new Set(chosen.map((c) => c.familyNo));
+    const freeBy = new Map(free.map((c) => [c.familyNo, c]));
+    const rejected: { familyNo: string; reason: string }[] = [];
+    for (const no of [...new Set(sel.include)]) {
+      if (have.has(no)) continue;
+      const c = freeBy.get(no);
+      if (c) { chosen.push({ ...c, manual: true }); have.add(no); continue; }
+      const known = busy.has(no) ? 'استلمت من البرنامج قريباً أو لها فيه استحقاق قائم'
+        : (await this.db.query("select 1 from families where family_no = $1 and status = 'APPROVED'", [no])).rowCount ? 'لا تستحق بشروط البرنامج' : 'لا عائلة معتمدة بهذا الرقم';
+      rejected.push({ familyNo: no, reason: known });
+    }
+    return {
+      chosen, rejected,
+      funnel: { eligible, available: free.length, filtered, afterExclude, capped, manual: chosen.length - capped, final: chosen.length },
+    };
+  }
+
+  /** معاينة اختيار لم يُحفظ: كم يبقى بعد كل خطوة، ومن هم. لا تُنشئ شيئاً. */
+  async preview(programId: string, sel: Selection) {
+    const program = await this.programs.get(programId);
+    const r = await this.select(program, sel);
+    const { rows: free } = sel.manualOnly ? { rows: [] as Candidate[] } : await this.available(program);
+    return {
+      unit: program.unit, funnel: r.funnel, rejected: r.rejected,
+      quantity: r.chosen.reduce((s, c) => s + c.quantity, 0),
+      mahallas: [...new Set(free.map((c) => c.mahalla).filter(Boolean))].sort() as string[],
+      families: r.chosen.slice(0, 500).map((c) => ({ familyNo: c.familyNo, headName: c.headName, members: c.members, points: c.points, class: c.class, registeredAt: c.registeredAt, mahalla: c.mahalla, quantity: c.quantity, manual: !!c.manual })),
+    };
+  }
+
+  /** عوائل الحملة بحال كلٍّ منها: للاستعلام عن حملة جارية أو سابقة. */
+  async families(id: string, p: z.infer<typeof listFamiliesSchema>) {
+    const q = p.q ? toAsciiDigits(p.q) : null;
+    const where = `e.campaign_id = $1 and ($2::entitlement_status is null or e.status = $2) and ($3::uuid is null or e.point_id = $3)
+      and ($4::text is null or f.family_no like $4 || '%' or ($5::text is not null and h.name_norm like '%' || $5 || '%'))`;
+    // الاسم يُطابَق بعد توحيد حروفه؛ والبحث برقم لا يطابق الأسماء.
+    const args = [id, p.status ?? null, p.pointId ?? null, q, (q && normalizeName(q)) || null];
+    const total = await this.db.query(`select count(*)::int as n from entitlements e join families f on f.id = e.family_id left join persons h on h.family_id = f.id and h.relation = 'HEAD' where ${where}`, args);
+    const { rows } = await this.db.query(
+      `select e.id, e.status, e.quantity, e.serial, e.delivered_at, e.receiver, e.receiver_name, e.mode, f.id as family_id, f.family_no, f.phone1, h.full_name,
+              ap.name as point, dp.name as delivered_point, u.username, e.proof_attachment is not null as has_proof
+       from entitlements e join families f on f.id = e.family_id left join persons h on h.family_id = f.id and h.relation = 'HEAD'
+         join distribution_points ap on ap.id = e.point_id left join distribution_points dp on dp.id = e.delivered_point left join users u on u.id = e.delivered_by
+       where ${where} order by e.serial limit $6 offset $7`, [...args, p.limit, p.offset]);
+    return {
+      total: total.rows[0].n,
+      rows: rows.map((r) => ({
+        entitlementId: r.id, familyId: r.family_id, familyNo: r.family_no, headName: r.full_name, hasPhone: !!r.phone1, status: r.status, quantity: r.quantity, point: r.point,
+        deliveredAt: r.delivered_at, deliveredPoint: r.delivered_point, receiver: r.receiver, receiverName: r.receiver_name, mode: r.mode, by: r.username, hasProof: r.has_proof,
+      })),
+    };
+  }
+
+  /** إضافة عائلة باليد إلى مسودة. يلزم أن تستحق البرنامج، ولا يكون لها فيه استحقاق قائم. */
+  async addFamily(id: string, familyNo: string, actor: AuthUser) {
+    const camp = (await this.db.query('select * from campaigns where id = $1', [id])).rows[0];
+    if (!camp) throw new NotFoundException('الحملة غير موجودة');
+    if (camp.status !== 'DRAFT') throw new ConflictException('العوائل تُضاف وتُحذف والحملة مسودة فقط');
+    const program = await this.programs.get(camp.program_id);
+    const { rows: free, busy } = await this.available(program, id);
+    const no = toAsciiDigits(familyNo).trim();
+    const c = free.find((x) => x.familyNo === no);
+    if (!c) {
+      const known = busy.has(no) ? 'استلمت من البرنامج قريباً أو لها فيه استحقاق قائم'
+        : (await this.db.query("select 1 from families where family_no = $1 and status = 'APPROVED'", [no])).rowCount ? 'لا تستحق بشروط البرنامج' : 'لا عائلة معتمدة بهذا الرقم';
+      throw new BadRequestException(`لا تُضاف العائلة ${no}: ${known}`);
+    }
+    try {
+      await this.db.tx(async (tx) => {
+        await tx.query('select 1 from campaigns where id = $1 for update', [id]);
+        // إلى أقل النقاط حملاً، ليبقى التقسيم متساوياً.
+        const point = (await tx.query(
+          `select p.point_id from (select distinct point_id from entitlements where campaign_id = $1) p
+           order by (select count(*) from entitlements e where e.campaign_id = $1 and e.point_id = p.point_id), p.point_id limit 1`, [id])).rows[0].point_id;
+        await tx.query(
+          'insert into entitlements (campaign_id, family_id, point_id, serial, quantity) values ($1,$2,$3,(select coalesce(max(serial), 0) + 1 from entitlements where campaign_id = $1),$4)',
+          [id, c.familyId, point, c.quantity]);
+        await this.audit.append(tx, { actorId: actor.id, action: 'campaign.add_family', entity: 'campaign', entityId: id, payload: { familyNo: no, quantity: c.quantity } });
+      });
+    } catch (err: any) {
+      if (err.code === '23505') throw new ConflictException('العائلة في الحملة أصلاً');
+      throw err;
+    }
+    return this.detail(id);
+  }
+
+  /** حذف عائلة من مسودة، بسببه. بعد الاعتماد لا يُحذف أحد: تُقفل الحملة أو يُلغى استحقاقه. */
+  async removeFamily(id: string, entitlementId: string, note: string, actor: AuthUser) {
+    await this.db.tx(async (tx) => {
+      const camp = (await tx.query('select status from campaigns where id = $1 for update', [id])).rows[0];
+      if (!camp) throw new NotFoundException('الحملة غير موجودة');
+      if (camp.status !== 'DRAFT') throw new ConflictException('العوائل تُضاف وتُحذف والحملة مسودة فقط');
+      const left = (await tx.query('select count(*)::int as n from entitlements where campaign_id = $1', [id])).rows[0].n;
+      if (left <= 1) throw new ConflictException('لا تبقى الحملة بلا عوائل. ألغِها إن لم تعد لازمة.');
+      const gone = await tx.query(
+        'delete from entitlements e using families f where e.id = $1 and e.campaign_id = $2 and f.id = e.family_id returning f.family_no', [entitlementId, id]);
+      if (!gone.rowCount) throw new NotFoundException('العائلة ليست في هذه الحملة');
+      await this.audit.append(tx, { actorId: actor.id, action: 'campaign.remove_family', entity: 'campaign', entityId: id, payload: { familyNo: gone.rows[0].family_no, note } });
+    });
+    return this.detail(id);
+  }
+
+  /** صورة رمز الاستلام برابط موقَّع، تُرفق برسالة واتساب. تُحجب ما إن يُسلَّم الاستحقاق أو تُقفل حملته. */
+  async qrPng(token: string): Promise<Buffer> {
+    const [id, exp, sig] = token.replace(/\.png$/, '').split('.');
+    const expected = Buffer.from(this.crypto.sign(`qr:${id}.${exp}`));
+    const given = Buffer.from(sig ?? '');
+    if (!id || !exp || given.length !== expected.length || !timingSafeEqual(given, expected)) throw new NotFoundException();
+    if (Number(exp) < Date.now() / 1000) throw new GoneException('انتهت مدة هذا الرمز');
+    const row = (await this.db.query(`${ENT_SQL} where e.id = $1`, [id])).rows[0];
+    if (!row || row.status !== 'PENDING' || row.campaign_status !== 'ACTIVE') throw new GoneException('هذا الرمز لم يعد صالحاً');
+    return QRCode.toBuffer(this.tokenFor(row), { errorCorrectionLevel: 'M', margin: 3, width: 720 });
+  }
+
   async list() {
     const { rows } = await this.db.query(
-      `select c.id, c.name, c.status, c.unit, c.starts_on, c.ends_on, p.name as program,
+      `select c.id, c.name, c.status, c.unit, c.starts_on, c.ends_on, c.created_at, c.closed_at, p.name as program, p.kind,
               count(e.id)::int as families, count(e.id) filter (where e.status = 'DELIVERED')::int as delivered,
               coalesce(sum(e.quantity), 0)::int as quantity
        from campaigns c join programs p on p.id = c.program_id left join entitlements e on e.campaign_id = c.id
-       group by c.id, p.name order by c.created_at desc`,
+       group by c.id, p.name, p.kind order by c.created_at desc`,
     );
-    return rows.map((r) => ({ id: r.id, name: r.name, status: r.status, unit: r.unit, startsOn: r.starts_on, endsOn: r.ends_on, program: r.program, families: r.families, delivered: r.delivered, quantity: r.quantity }));
+    return rows.map((r) => ({ id: r.id, name: r.name, status: r.status, unit: r.unit, startsOn: r.starts_on, endsOn: r.ends_on, program: r.program, kind: r.kind, createdAt: r.created_at, closedAt: r.closed_at, families: r.families, delivered: r.delivered, quantity: r.quantity }));
   }
 
   async detail(id: string) {
     const head = await this.db.query(
-      `select c.*, p.name as program, cu.username as created_by_username, du.username as decided_by_username
+      `select c.*, p.name as program, p.kind, cu.username as created_by_username, du.username as decided_by_username
        from campaigns c join programs p on p.id = c.program_id join users cu on cu.id = c.created_by left join users du on du.id = c.decided_by
        where c.id = $1`,
       [id],
@@ -219,7 +426,7 @@ export class DistributionService {
     const sum = (key: string) => points.rows.reduce((s, r) => s + r[key], 0);
     return {
       id: c.id, name: c.name, status: c.status, unit: c.unit, program: c.program, startsOn: c.starts_on, endsOn: c.ends_on,
-      fundId: c.fund_id as string | null, createdBy: c.created_by_username, createdAt: c.created_at, decidedBy: c.decided_by_username, decidedAt: c.decided_at, decisionNote: c.decision_note,
+      fundId: c.fund_id as string | null, selection: c.selection, kind: c.kind as string, closedAt: c.closed_at, createdBy: c.created_by_username, createdAt: c.created_at, decidedBy: c.decided_by_username, decidedAt: c.decided_at, decisionNote: c.decision_note,
       totals: { families: sum('assigned'), quantity: sum('quantity'), delivered: sum('delivered'), deliveredQuantity: sum('delivered_quantity'), byProxy: proxy.rows[0].n },
       points: points.rows.map((r) => ({ id: r.id, name: r.name, assigned: r.assigned, quantity: r.quantity, delivered: r.delivered, deliveredQuantity: r.delivered_quantity, lastDelivery: r.last_delivery })),
       recent: recent.rows.map((r) => ({ id: r.id, familyId: r.family_id, familyNo: r.family_no, receiver: r.receiver, receiverName: r.receiver_name, quantity: r.quantity, deliveredAt: r.delivered_at, mode: r.mode, point: r.point, by: r.username, hasProof: r.has_proof })),
@@ -248,7 +455,7 @@ export class DistributionService {
   async decide(id: string, approve: boolean, note: string | undefined, actor: AuthUser) {
     const result = await this.decideTx(id, approve, note, actor);
     // دعوة الاستلام تخرج بعد ثبوت الاعتماد، ومعها الرمز الرقمي لكل عائلة.
-    if (approve) await this.notifications.system('CAMPAIGN_INVITE', `دعوة الاستلام: ${result.name}`, INVITE, { campaignId: id });
+    if (approve) await this.notifications.system('CAMPAIGN_INVITE', `دعوة الاستلام: ${result.name}`, INVITE, { campaignId: id }, undefined, true);
     return result;
   }
 

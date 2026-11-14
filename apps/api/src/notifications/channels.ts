@@ -9,7 +9,8 @@ export interface ChannelDriver {
   readonly name: string;
   /** هل هو مزوّد حقيقي يوصل الرسالة إلى الهاتف؟ */
   readonly live: boolean;
-  send(channel: Channel, phone: string, text: string): Promise<SendResult>;
+  /** imageUrl: صورة تُرفق بالرسالة إن حملتها القناة (واتساب). الرسالة النصية والمكالمة تتجاهلانها. */
+  send(channel: Channel, phone: string, text: string, imageUrl?: string): Promise<SendResult>;
 }
 
 /**
@@ -28,7 +29,7 @@ export class SimulatedDriver implements ChannelDriver {
 
 /**
  * مزوّد عبر بوّابة HTTP: يرسل كل رسالة طلباً إلى عنوان يُضبط في الإعداد.
- * الطلب:  POST <العنوان>  بترويسة Authorization: Bearer <الرمز>  وجسم {"channel","to","text"}
+ * الطلب:  POST <العنوان>  بترويسة Authorization: Bearer <الرمز>  وجسم {"channel","to","text"}، ومعها "imageUrl" في واتساب إن كان للرسالة صورة.
  * الجواب: 2xx وفيه {"id": "..."} نجاح؛ 429 أو 5xx أو انقطاع: عطل عابر يُعاد بعده؛ وغيرها إخفاق نهائي.
  * أكثر بوّابات الرسائل تقبل هذا الشكل أو يُكتب لها وسيط صغير يحوّله.
  */
@@ -40,14 +41,14 @@ export class HttpGatewayDriver implements ChannelDriver {
     this.name = `بوّابة ${new URL(url).host}`;
   }
 
-  async send(channel: Channel, phone: string, text: string): Promise<SendResult> {
+  async send(channel: Channel, phone: string, text: string, imageUrl?: string): Promise<SendResult> {
     if (!this.channels.includes(channel)) return { ok: false, error: 'القناة غير مفعَّلة عند المزوّد' };
     let res: Response;
     try {
       res = await fetch(this.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` },
-        body: JSON.stringify({ channel, to: phone, text }),
+        body: JSON.stringify({ channel, to: phone, text, ...(imageUrl ? { imageUrl } : {}) }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (err) {

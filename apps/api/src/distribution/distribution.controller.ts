@@ -1,11 +1,12 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { z } from 'zod';
 import { MAX_FILE_BYTES } from '../attachments/attachments.service';
-import { AuthUser, CurrentUser, Roles } from '../auth/auth.guard';
+import { AuthUser, CurrentUser, Public, Roles } from '../auth/auth.guard';
 import { ZodPipe } from '../common/zod.pipe';
 import {
-  CampaignInput, campaignSchema, CheckInput, checkSchema, DistributionService, RedeemInput, redeemSchema, SyncInput, syncSchema,
+  CampaignInput, campaignSchema, CheckInput, checkSchema, DistributionService, listFamiliesSchema, previewSchema, RedeemInput, redeemSchema, SyncInput, syncSchema,
 } from './distribution.service';
 
 const MANAGERS = ['ADMIN', 'DISTRIBUTION_MANAGER'] as const;
@@ -40,6 +41,41 @@ export class DistributionController {
   @Roles(...MANAGERS)
   create(@Body(new ZodPipe(campaignSchema)) body: CampaignInput, @CurrentUser() user: AuthUser) {
     return this.dist.create(body, user);
+  }
+
+  @Post('campaigns/preview')
+  @HttpCode(200)
+  @Roles(...MANAGERS)
+  preview(@Body(new ZodPipe(previewSchema)) body: z.infer<typeof previewSchema>) {
+    return this.dist.preview(body.programId, body.selection);
+  }
+
+  @Get('campaigns/:id/families')
+  @Roles(...READERS)
+  families(@Param('id', ParseUUIDPipe) id: string, @Query(new ZodPipe(listFamiliesSchema)) q: z.infer<typeof listFamiliesSchema>) {
+    return this.dist.families(id, q);
+  }
+
+  @Post('campaigns/:id/families')
+  @HttpCode(200)
+  @Roles(...MANAGERS)
+  addFamily(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(z.object({ familyNo: z.string().trim().min(1).max(20) }))) body: { familyNo: string }, @CurrentUser() user: AuthUser) {
+    return this.dist.addFamily(id, body.familyNo, user);
+  }
+
+  @Delete('campaigns/:id/families/:entitlementId')
+  @Roles(...MANAGERS)
+  removeFamily(@Param('id', ParseUUIDPipe) id: string, @Param('entitlementId', ParseUUIDPipe) entitlementId: string,
+    @Body(new ZodPipe(z.object({ note: z.string().trim().min(3, 'يلزم ذكر السبب') }))) body: { note: string }, @CurrentUser() user: AuthUser) {
+    return this.dist.removeFamily(id, entitlementId, body.note, user);
+  }
+
+  /** صورة رمز الاستلام. الرابط الموقَّع نفسه هو الإذن؛ يفتحه واتساب ليرفق الصورة برسالة الدعوة. */
+  @Public()
+  @Get('qr/:token')
+  async qr(@Param('token') token: string, @Res() res: Response) {
+    const png = await this.dist.qrPng(token);
+    res.set({ 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=300' }).end(png);
   }
 
   @Get('campaigns/:id')

@@ -28,7 +28,7 @@ export type ComposeInput = z.infer<typeof composeSchema>;
 
 interface Recipient {
   familyId: string; familyNo: string; headName: string; phone: string | null; hasWhatsapp: boolean; prefersVoice: boolean;
-  point?: string; endsOn?: string; quantity?: number; unit?: string; codeEnc?: string;
+  point?: string; endsOn?: string; quantity?: number; unit?: string; codeEnc?: string; entitlementId?: string;
 }
 
 /** مهلة إعادة المحاولة بعد العطل العابر، بالدقائق: دقيقة، ثم خمس، ثم ثلاثون. بعدها تُعدّ الرسالة مخفقة. */
@@ -49,7 +49,7 @@ export class NotificationsService {
     if ((a.pendingOnly || a.pointId) && !a.campaignId) throw new BadRequestException('حال الاستلام والنقطة لا يُختاران إلا مع حملة');
     const { rows } = await this.db.query(
       `select f.id, f.family_no, f.phone1, f.has_whatsapp, f.prefers_voice, h.full_name as head_name,
-              dp.name as point, c.ends_on, c.unit, e.quantity, e.code_enc
+              dp.name as point, c.ends_on, c.unit, e.quantity, e.code_enc, e.id as entitlement_id
        from families f
          left join persons h on h.family_id = f.id and h.relation = 'HEAD'
          left join family_scores sc on sc.family_id = f.id
@@ -69,7 +69,7 @@ export class NotificationsService {
     );
     return rows.map((r) => ({
       familyId: r.id, familyNo: r.family_no, headName: r.head_name, phone: r.phone1, hasWhatsapp: r.has_whatsapp, prefersVoice: r.prefers_voice,
-      point: r.point ?? undefined, endsOn: r.ends_on ?? undefined, quantity: r.quantity ?? undefined, unit: r.unit ?? undefined, codeEnc: r.code_enc ?? undefined,
+      point: r.point ?? undefined, endsOn: r.ends_on ?? undefined, quantity: r.quantity ?? undefined, unit: r.unit ?? undefined, codeEnc: r.code_enc ?? undefined, entitlementId: r.entitlement_id ?? undefined,
     }));
   }
 
@@ -109,15 +109,28 @@ export class NotificationsService {
    * يكتب رسالة لكل عائلة في الطابور. الكتابة دفعة واحدة، والإرسال بعدها:
    * مع المحاكاة يُرسل في الحال، ومع مزوّد حقيقي يرسله العامل بسرعة محدودة (انظر processQueue).
    */
-  private async deliver(notificationId: string, body: string, list: Recipient[]) {
-    const rows = list.map((r) => ({ familyId: r.familyId, phone: r.phone ?? null, text: this.textFor(body, r), chain: r.phone ? chainFor(r) : [] }));
+  /**
+   * رابط صورة رمز الاستلام لعائلة في حملة. يُرفق برسالة واتساب؛ ومن تصله رسالة نصية يكفيه الرمز الرقمي في نصها.
+   * يحتاج عنوان النظام العلني (PUBLIC_BASE_URL)، فبدونه لا يبلغ واتساب الصورةَ ولا تُرفق.
+   */
+  private qrUrl(r: Recipient): string | null {
+    const base = process.env.PUBLIC_BASE_URL?.replace(/\/+$/, '');
+    if (!base || !r.entitlementId || !r.endsOn) return null;
+    const end = new Date(r.endsOn);
+    end.setHours(23, 59, 59);
+    const body = `${r.entitlementId}.${Math.floor(end.getTime() / 1000)}`;
+    return `${base}/api/qr/${body}.${this.crypto.sign(`qr:${body}`)}.png`;
+  }
+
+  private async deliver(notificationId: string, body: string, list: Recipient[], withQr = false) {
+    const rows = list.map((r) => ({ familyId: r.familyId, phone: r.phone ?? null, text: this.textFor(body, r), chain: r.phone ? chainFor(r) : [], media: withQr && r.phone ? this.qrUrl(r) : null }));
     for (let i = 0; i < rows.length; i += 1000) {
       const part = rows.slice(i, i + 1000);
       await this.db.query(
-        `insert into messages (notification_id, family_id, phone, text, status, chain, next_attempt_at)
-         select $1, f, p, t, (case when p is null then 'NO_PHONE' else 'QUEUED' end)::message_status, c::message_channel[], case when p is null then null else now() end
-         from unnest($2::uuid[], $3::text[], $4::text[], $5::text[]) as x(f, p, t, c)`,
-        [notificationId, part.map((r) => r.familyId), part.map((r) => r.phone), part.map((r) => r.text), part.map((r) => `{${r.chain.join(',')}}`)],
+        `insert into messages (notification_id, family_id, phone, text, status, chain, next_attempt_at, media_url)
+         select $1, f, p, t, (case when p is null then 'NO_PHONE' else 'QUEUED' end)::message_status, c::message_channel[], case when p is null then null else now() end, m
+         from unnest($2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[]) as x(f, p, t, c, m)`,
+        [notificationId, part.map((r) => r.familyId), part.map((r) => r.phone), part.map((r) => r.text), part.map((r) => `{${r.chain.join(',')}}`), part.map((r) => r.media)],
       );
     }
     if (!this.channels.current.live) while ((await this.processQueue(500, notificationId)) > 0);
@@ -134,7 +147,7 @@ export class NotificationsService {
       `update messages m set attempts = attempts + 1, next_attempt_at = now() + interval '10 minutes'
        where m.id in (select id from messages where status = 'QUEUED' and next_attempt_at <= now() and ($2::uuid is null or notification_id = $2)
                       order by next_attempt_at limit $1 for update skip locked)
-       returning m.id, m.phone, m.text, m.chain::text[] as chain, m.attempts`,
+       returning m.id, m.phone, m.text, m.chain::text[] as chain, m.attempts, m.media_url`,
       [limit, notificationId ?? null],
     );
     for (const m of rows) {
@@ -145,7 +158,7 @@ export class NotificationsService {
       // بترتيب القنوات: إن أخفقت قناة جُرِّبت التي بعدها.
       for (const channel of m.chain as Channel[]) {
         tried.push(channel);
-        const res: SendResult = await driver.send(channel, m.phone, m.text).catch((e: Error) => ({ ok: false, error: e.message, retry: true }));
+        const res: SendResult = await driver.send(channel, m.phone, m.text, channel === 'WHATSAPP' ? (m.media_url ?? undefined) : undefined).catch((e: Error) => ({ ok: false, error: e.message, retry: true }));
         if (res.ok) { sent = { channel, ref: res.providerRef }; break; }
         error = res.error ?? 'أخفق الإرسال';
         transient ||= !!res.retry;
@@ -204,14 +217,14 @@ export class NotificationsService {
   }
 
   /** رسائل يصدرها النظام من نفسه (دعوة الاستلام، تأكيد التسليم). لا تحتاج اعتماداً: يغطيها اعتماد الحملة. */
-  async system(kind: 'CAMPAIGN_INVITE' | 'DELIVERY_CONFIRMATION', title: string, body: string, audience: Audience, onlyFamily?: string) {
+  async system(kind: 'CAMPAIGN_INVITE' | 'DELIVERY_CONFIRMATION', title: string, body: string, audience: Audience, onlyFamily?: string, withQr = false) {
     const list = await this.recipients(audience, onlyFamily);
     if (!list.length) return null;
     const { rows } = await this.db.query(
       "insert into notifications (kind, title, body, audience, campaign_id, status, recipients) values ($1,$2,$3,$4,$5,'SENT',$6) returning id",
       [kind, title, body, JSON.stringify(audience), audience.campaignId ?? null, list.length],
     );
-    await this.deliver(rows[0].id, body, list);
+    await this.deliver(rows[0].id, body, list, withQr);
     return rows[0].id as string;
   }
 
@@ -260,11 +273,11 @@ export class NotificationsService {
 
   async forFamily(familyId: string) {
     const { rows } = await this.db.query(
-      `select m.id, m.channel, m.status, m.text, m.sent_at, n.title, n.kind from messages m join notifications n on n.id = m.notification_id
+      `select m.id, m.channel, m.status, m.text, m.sent_at, m.media_url is not null as has_image, n.title, n.kind from messages m join notifications n on n.id = m.notification_id
        where m.family_id = $1 order by m.sent_at desc limit 50`,
       [familyId],
     );
-    return rows.map((r) => ({ id: r.id, channel: r.channel, status: r.status, text: r.text, sentAt: r.sent_at, title: r.title, kind: r.kind }));
+    return rows.map((r) => ({ id: r.id, channel: r.channel, status: r.status, text: r.text, sentAt: r.sent_at, title: r.title, kind: r.kind, hasImage: r.has_image && r.channel === 'WHATSAPP' }));
   }
 
   driver() {
