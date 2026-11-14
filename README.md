@@ -95,6 +95,10 @@ pnpm jest --rootDir . --testMatch '**/*.bench.ts' --testTimeout 900000
 cd ../admin && ADMIN_PASSWORD=... node e2e/families.cjs
 ```
 
+اختبارات المتصفح تحتاج Playwright ومتصفحه على الجهاز، وهو **ليس في حزم المشروع**:
+`npm i -g playwright && npx playwright install chromium`. وهي لا تجري في CI بعد: تُشغَّل باليد.
+والاختبارات تمحو قاعدتها كلها في كل تشغيل، فترفض أن تعمل على قاعدة لا ينتهي اسمها بـ`_test`.
+
 اختبار تطبيق الميدان (على قاعدة فارغة، والخادم يخدم `apps/mobile/dist`):
 
 ```bash

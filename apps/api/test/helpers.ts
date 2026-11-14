@@ -34,6 +34,9 @@ export async function startApp(): Promise<INestApplication> {
   process.env.TOKEN_SIGNING_SEED = randomBytes(32).toString('base64');
   process.env.STORAGE_DIR = mkdtempSync(join(tmpdir(), 'eywaa-storage-'));
 
+  // الاختبارات تمحو القاعدة كلها: لا تُمسّ قاعدة لا ينتهي اسمها بـ«_test»، لئلا يُشار إلى قاعدة حيّة خطأً فتُمحى.
+  const dbName = new URL(TEST_DB).pathname.replace(/^\//, '');
+  if (!/_test$/.test(dbName)) throw new Error(`refusing to wipe database "${dbName}": TEST_DATABASE_URL must name a database ending in "_test"`);
   await sql('drop schema public cascade; create schema public;');
   await migrate(TEST_DB);
 
