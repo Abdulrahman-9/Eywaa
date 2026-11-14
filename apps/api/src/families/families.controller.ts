@@ -11,6 +11,7 @@ const STATUSES = ['PENDING_DEDUPE_REVIEW', 'PENDING_APPROVAL', 'APPROVED', 'REJE
 const listSchema = z.object({
   status: z.enum(STATUSES).optional(),
   q: z.string().optional(),
+  class: z.enum(['A', 'B', 'C', 'D']).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

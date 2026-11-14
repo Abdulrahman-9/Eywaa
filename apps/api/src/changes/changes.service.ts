@@ -7,6 +7,7 @@ import { normalizeName } from '../common/arabic';
 import { Db } from '../db/db.module';
 import { documentSchema, memberSchema, optionalText, phone, text } from '../families/families.schema';
 import { FamiliesService } from '../families/families.service';
+import { ScoringService } from '../scoring/scoring.service';
 
 const nullableText = z.string().trim().min(1).nullable().optional();
 
@@ -62,6 +63,7 @@ export class ChangesService {
     @Inject(Db) private readonly db: Db,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(FamiliesService) private readonly families: FamiliesService,
+    @Inject(ScoringService) private readonly scoring: ScoringService,
   ) {}
 
   async request(familyId: string, type: ChangeType, rawPayload: unknown, reason: string, actor: AuthUser) {
@@ -122,6 +124,8 @@ export class ChangesService {
         if (approve) {
           await this.precheck(c, req.family_id, req.type, req.payload);
           before = await this.apply(c, req.family_id, req.type, req.payload);
+          // تغيّرت بيانات العائلة، فتُعاد نقاطها (لا أثر له إن لم تكن معتمدة).
+          await this.scoring.recompute(c, req.family_id);
         }
         await c.query(
           'update change_requests set status = $2, decided_by = $3, decided_at = now(), decision_note = $4 where id = $1',

@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { FAMILY_STATUS, TAGS, type FamilyStatus } from '../lib/labels';
 import type { FamilyRow } from '../lib/types';
+import { CLASS_AR } from './Scoring';
 
 const PAGE = 25;
 const CAN_REGISTER = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
@@ -15,6 +16,7 @@ export function Families() {
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
   const [status, setStatus] = useState<FamilyStatus | ''>('');
+  const [cls, setCls] = useState('');
   const [page, setPage] = useState(0);
   useEffect(() => {
     const t = setTimeout(() => { setDebounced(q.trim()); setPage(0); }, 300);
@@ -24,8 +26,9 @@ export function Families() {
   const params = new URLSearchParams({ limit: String(PAGE), offset: String(page * PAGE) });
   if (debounced) params.set('q', debounced);
   if (status) params.set('status', status);
+  if (cls) params.set('class', cls);
   const list = useQuery({
-    queryKey: ['families', debounced, status, page],
+    queryKey: ['families', debounced, status, cls, page],
     queryFn: () => api<FamilyRow[]>(`/families?${params}`),
     placeholderData: keepPreviousData,
   });
@@ -56,6 +59,16 @@ export function Families() {
             )}
           </Field>
         </div>
+        <div className="min-w-32 flex-1">
+          <Field label="الفئة">
+            {(id) => (
+              <Select id={id} value={cls} onChange={(e) => { setCls(e.target.value); setPage(0); }}>
+                <option value="">الكل</option>
+                {Object.entries(CLASS_AR).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </Select>
+            )}
+          </Field>
+        </div>
       </Card>
       {list.error && <Alert>{list.error.message}</Alert>}
       <Card className="p-0">
@@ -63,13 +76,13 @@ export function Families() {
           <table className="w-full min-w-[46rem] border-collapse">
             <thead>
               <tr className="text-sm text-muted">
-                {['رقم العائلة', 'رب الأسرة', 'الأفراد', 'الفئات', 'الحال', ''].map((h, i) => (
+                {['رقم العائلة', 'رب الأسرة', 'الأفراد', 'الفئة والنقاط', 'الوسوم', 'الحال', ''].map((h, i) => (
                   <th key={i} scope="col" className="border-b border-line px-4 py-3 text-start font-medium">{h || <span className="sr-only">فتح</span>}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {list.isPending && [0, 1, 2, 3].map((i) => <tr key={i}><td colSpan={6} className="px-4 py-3"><Skeleton /></td></tr>)}
+              {list.isPending && [0, 1, 2, 3].map((i) => <tr key={i}><td colSpan={7} className="px-4 py-3"><Skeleton /></td></tr>)}
               {rows.map((f) => (
                 <tr key={f.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-3 font-semibold tabular-nums">{f.familyNo}</td>
@@ -78,6 +91,7 @@ export function Families() {
                     {f.phone1 && <div dir="ltr" className="text-end text-sm text-muted">{f.phone1}</div>}
                   </td>
                   <td className="px-4 py-3">{f.members}</td>
+                  <td className="whitespace-nowrap px-4 py-3">{f.score ? <><strong>{CLASS_AR[f.score.class]}</strong> <span className="text-muted">{f.score.points} نقطة</span></> : <span className="text-muted">—</span>}</td>
                   <td className="px-4 py-3 text-sm">{f.tags.map((t) => TAGS[t]).join('، ') || '—'}</td>
                   <td className="px-4 py-3"><Badge tone={FAMILY_STATUS[f.status].tone}>{FAMILY_STATUS[f.status].label}</Badge></td>
                   <td className="px-4 py-2 text-end">
@@ -86,7 +100,7 @@ export function Families() {
                 </tr>
               ))}
               {list.isSuccess && rows.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-muted">{debounced || status ? 'لا عائلة تطابق البحث.' : 'لم تُسجَّل عائلة بعد.'}</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-muted">{debounced || status || cls ? 'لا عائلة تطابق البحث.' : 'لم تُسجَّل عائلة بعد.'}</td></tr>
               )}
             </tbody>
           </table>

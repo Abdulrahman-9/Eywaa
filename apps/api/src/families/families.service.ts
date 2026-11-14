@@ -6,6 +6,7 @@ import { normalizeDocNumber, normalizeName, toAsciiDigits } from '../common/arab
 import { FieldCrypto, mask } from '../common/crypto';
 import { formatFamilyNo } from '../common/family-no';
 import { Db } from '../db/db.module';
+import { ScoringService } from '../scoring/scoring.service';
 import { SettingsService } from '../settings/settings.service';
 import { CreateFamilyInput, DocumentInput, documentKey } from './families.schema';
 
@@ -34,6 +35,7 @@ export class FamiliesService {
     @Inject(FieldCrypto) private readonly crypto: FieldCrypto,
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(SettingsService) private readonly settings: SettingsService,
+    @Inject(ScoringService) private readonly scoring: ScoringService,
   ) {}
 
   /** يضيف وثيقة هوية لفرد. قيد الفرادة في القاعدة يمنع تكرارها. */
@@ -238,8 +240,10 @@ export class FamiliesService {
 
   async get(id: string) {
     const fam = await this.db.query(
-      `select f.*, f.tags::text[] as tags, cu.username as created_by_username, du.username as decided_by_username
+      `select f.*, f.tags::text[] as tags, cu.username as created_by_username, du.username as decided_by_username,
+              sc.points as score_points, sc.class as score_class
        from families f join users cu on cu.id = f.created_by left join users du on du.id = f.decided_by
+         left join family_scores sc on sc.family_id = f.id
        where f.id = $1`,
       [id],
     );
@@ -272,6 +276,7 @@ export class FamiliesService {
       id: f.id,
       familyNo: f.family_no,
       status: f.status,
+      score: f.score_class ? { points: f.score_points, class: f.score_class } : null,
       tags: f.tags,
       phone1: f.phone1,
       phone2: f.phone2,
@@ -337,25 +342,29 @@ export class FamiliesService {
     };
   }
 
-  async list(params: { status?: string; q?: string; limit: number; offset: number }) {
+  async list(params: { status?: string; q?: string; class?: string; limit: number; offset: number }) {
     const q = params.q?.trim();
     const digits = q ? toAsciiDigits(q).replace(/\D/g, '') : '';
     const isNumeric = !!q && digits.length > 0 && /^[\d٠-٩\s+]+$/.test(q);
     const nameNorm = q && !isNumeric ? normalizeName(q) : null;
     const { rows } = await this.db.query(
       `select f.id, f.family_no, f.status, f.tags::text[] as tags, f.phone1, f.created_at, h.full_name as head_name,
+              sc.points as score_points, sc.class as score_class,
               (select count(*) from persons p where p.family_id = f.id and p.status = 'ACTIVE')::int as members
        from families f left join persons h on h.family_id = f.id and h.relation = 'HEAD'
+         left join family_scores sc on sc.family_id = f.id
        where ($1::family_status is null or f.status = $1)
          and ($2::text is null or f.family_no = $2 or f.phone1 like '%' || $2 or f.phone2 like '%' || $2)
          and ($3::text is null or exists (
                select 1 from persons p where p.family_id = f.id and p.name_norm like '%' || $3 || '%'))
+         and ($6::text is null or sc.class = $6)
        order by f.created_at desc limit $4 offset $5`,
-      [params.status ?? null, isNumeric ? digits : null, nameNorm, params.limit, params.offset],
+      [params.status ?? null, isNumeric ? digits : null, nameNorm, params.limit, params.offset, params.class ?? null],
     );
     return rows.map((r) => ({
       id: r.id, familyNo: r.family_no, status: r.status, tags: r.tags, phone1: r.phone1,
       headName: r.head_name, members: r.members, createdAt: r.created_at,
+      score: r.score_class ? { points: r.score_points, class: r.score_class } : null,
     }));
   }
 
@@ -413,6 +422,9 @@ export class FamiliesService {
       );
       await c.query('update families set ration_hash = null where id = $1', [id]);
     }
+    // النقاط تُحسب عند الاعتماد، وتُمحى إن رُفض السجل.
+    if (decision === 'APPROVED') await this.scoring.recompute(c, id);
+    else await c.query('delete from family_scores where family_id = $1', [id]);
     await this.audit.append(c, {
       actorId: actor.id, action: decision === 'APPROVED' ? 'family.approve' : 'family.reject',
       entity: 'family', entityId: id, payload: { note: note ?? null },

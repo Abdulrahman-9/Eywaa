@@ -12,6 +12,8 @@ import { ChangesService } from './changes/changes.service';
 import { DbModule } from './db/db.module';
 import { FamiliesController } from './families/families.controller';
 import { FamiliesService } from './families/families.service';
+import { ScoringController } from './scoring/scoring.controller';
+import { ScoringService } from './scoring/scoring.service';
 import { SettingsController } from './settings/settings.controller';
 import { SettingsService } from './settings/settings.service';
 import { StatsController } from './stats/stats.controller';
@@ -21,10 +23,10 @@ import { UsersController } from './users/users.controller';
   imports: [DbModule],
   controllers: [
     AuthController, UsersController, AuditController, SettingsController, StatsController,
-    FamiliesController, AttachmentsController, ChangesController,
+    FamiliesController, AttachmentsController, ChangesController, ScoringController,
   ],
   providers: [
-    AuditService, SettingsService, FamiliesService, Storage, AttachmentsService, ChangesService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

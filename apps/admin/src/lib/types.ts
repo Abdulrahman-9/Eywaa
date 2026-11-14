@@ -7,8 +7,10 @@ export interface MemberView {
   documents: DocumentView[];
 }
 export interface FlagView { id: string; reason: string; score: number; status: string; note: string | null; personName: string; matchedPersonName: string; matchedFamilyNo: string }
+export interface ScoreBrief { points: number; class: 'A' | 'B' | 'C' | 'D' }
+export interface ScoreLine { key: string; label: string; got: number; max: number; why: string }
 export interface Family {
-  id: string; familyNo: string; status: FamilyStatus; tags: Tag[]; phone1: string | null; phone2: string | null;
+  id: string; familyNo: string; status: FamilyStatus; score: ScoreBrief | null; tags: Tag[]; phone1: string | null; phone2: string | null;
   address: { mahalla: string | null; street: string | null; house: string | null; landmark: string | null };
   housing: Housing | null; housingOther: string | null; prevAddress: string | null; prevLandmark: string | null;
   residenceCard: { number: string; issuedAt: string | null; issuedBy: string | null } | null;
@@ -21,7 +23,7 @@ export interface Family {
   duplicateFlags: FlagView[];
   createdBy: string; createdAt: string; decidedBy: string | null; decidedAt: string | null; decisionNote: string | null;
 }
-export interface FamilyRow { id: string; familyNo: string; status: FamilyStatus; tags: Tag[]; phone1: string | null; headName: string | null; members: number; createdAt: string }
+export interface FamilyRow { id: string; familyNo: string; status: FamilyStatus; tags: Tag[]; phone1: string | null; headName: string | null; members: number; createdAt: string; score: ScoreBrief | null }
 export interface Attachment { id: string; personId: string | null; category: AttachmentCategory; originalName: string; mime: string; sizeBytes: number; uploadedBy: string; createdAt: string }
 export interface ChangeRequest {
   id: string; familyId: string; familyNo: string; type: ChangeType; payload: Record<string, any>; reason: string;

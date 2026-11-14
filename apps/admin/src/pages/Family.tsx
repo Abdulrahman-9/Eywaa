@@ -10,7 +10,8 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { age, formatDateTime, formatNumber } from '../lib/format';
 import { CHANGE_STATUS, CHANGE_TYPES, DOC_TYPES, FAMILY_STATUS, HOUSING, INCOME_KINDS, RELATIONS, TAGS } from '../lib/labels';
-import type { ChangeRequest, Family as FamilyT } from '../lib/types';
+import type { ChangeRequest, Family as FamilyT, ScoreLine } from '../lib/types';
+import { CLASS_AR } from './Scoring';
 
 const DECIDERS = ['ADMIN', 'BENEFICIARY_SUPERVISOR'];
 const EDITORS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
@@ -26,6 +27,7 @@ export function Family() {
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<'approve' | 'reject' | 'change' | null>(null);
   const family = useQuery({ queryKey: ['family', id], queryFn: () => api<FamilyT>(`/families/${id}`) });
+  const score = useQuery({ queryKey: ['family', id, 'score'], queryFn: () => api<{ version: number; points: number; class: string; breakdown: ScoreLine[] } | null>(`/families/${id}/score`) });
   const changes = useQuery({ queryKey: ['changes', id], queryFn: () => api<ChangeRequest[]>(`/changes?familyId=${id}`) });
 
   const decide = useMutation({
@@ -57,6 +59,7 @@ export function Family() {
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold tabular-nums">العائلة {f.familyNo}</span>
             <Badge tone={FAMILY_STATUS[f.status].tone}>{FAMILY_STATUS[f.status].label}</Badge>
+            {f.score && <span className="rounded-md bg-brand-strong px-2.5 py-0.5 text-sm font-bold text-white">الفئة {CLASS_AR[f.score.class]} · {f.score.points} نقطة</span>}
             {f.tags.map((t) => <Badge key={t}>{TAGS[t]}</Badge>)}
           </div>
         </div>
@@ -124,6 +127,17 @@ export function Family() {
         </div>
 
         <div className="flex min-w-0 flex-[1_1_18rem] flex-col gap-5">
+          {score.data && (
+            <Card className="flex flex-col gap-2">
+              <h2 className="text-lg font-bold">لماذا {score.data.points} نقطة؟</h2>
+              <ul className="flex flex-col gap-1.5 text-sm">
+                {score.data.breakdown.map((l) => (
+                  <li key={l.key} className="flex justify-between gap-3"><span>{l.label} <span className="text-muted">({l.why})</span></span><strong className="flex-none tabular-nums">{l.got} / {l.max}</strong></li>
+                ))}
+              </ul>
+              <p className="border-t border-line pt-2 text-sm text-muted">الفئة {CLASS_AR[score.data.class]}، بالإصدار {score.data.version} من المعادلة.</p>
+            </Card>
+          )}
           <Card className="flex flex-col gap-2">
             <h2 className="text-lg font-bold">الدخل وخط الفقر</h2>
             {f.incomes.length === 0 && <p className="text-muted">لا دخل مسجَّل.</p>}

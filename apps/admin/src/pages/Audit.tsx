@@ -28,6 +28,9 @@ const ACTIONS: Record<string, string> = {
   'change.request': 'طلب تعديل',
   'change.approve': 'اعتماد تعديل',
   'change.reject': 'رفض تعديل',
+  'scoring.propose': 'اقتراح إصدار للنقاط',
+  'scoring.approve': 'اعتماد إصدار للنقاط',
+  'scoring.reject': 'رفض إصدار للنقاط',
 };
 
 const PAGE = 50;

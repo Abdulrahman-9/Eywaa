@@ -11,6 +11,7 @@ interface Overview {
   openDuplicateFlags: number;
   pendingChangeRequests: number;
   povertyLineIqd: number;
+  classes: Record<string, number>;
 }
 
 function Stat({ label, value, note }: { label: string; value?: number; note?: string }) {
@@ -49,6 +50,20 @@ export function Home() {
         <Stat label="طلبات تعديل تنتظر" value={data?.pendingChangeRequests} />
       </section>
 
+      {data && data.families.approved > 0 && (
+        <Card className="flex max-w-xl flex-col gap-3">
+          <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-bold">العوائل بحسب الفئة</h2><Link to="/scoring" className="font-semibold text-brand-strong">النقاط والفئات</Link></div>
+          <div className="grid grid-cols-[1.75rem_minmax(0,1fr)_3.5rem] items-center gap-x-3 gap-y-3">
+            {(['A', 'B', 'C', 'D'] as const).map((c) => (
+              <div key={c} className="contents">
+                <span className="font-bold">{{ A: 'أ', B: 'ب', C: 'ج', D: 'د' }[c]}</span>
+                <div aria-hidden="true" className="h-3.5 rounded bg-line"><div className="h-3.5 rounded bg-brand" style={{ width: `${(data.classes[c] / data.families.approved) * 100}%` }} /></div>
+                <span className="text-end tabular-nums">{formatNumber(data.classes[c])}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       {data && (
         <p className="text-muted">
           خط الفقر المعتمد: <strong className="text-ink">{formatNumber(data.povertyLineIqd)} دينار</strong> للفرد في الشهر.
