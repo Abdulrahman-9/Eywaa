@@ -31,6 +31,8 @@ export function Campaigns() {
   const [year, setYear] = useState('');
   const list = useQuery({ queryKey: ['campaigns'], queryFn: () => api<Row[]>('/campaigns') });
   const canManage = user?.role === 'ADMIN' || user?.role === 'DISTRIBUTION_MANAGER';
+  const flagged = useQuery({ queryKey: ['campaign-alerts'], queryFn: () => api<{ campaignId: string; alerts: number; high: number }[]>('/campaign-alerts'), enabled: canManage || user?.role === 'AUDITOR', refetchInterval: 60_000 });
+  const alertsOf = (id: string) => flagged.data?.find((x) => x.campaignId === id);
   const all = list.data ?? [];
   const programs = [...new Set(all.map((c) => c.program))].sort();
   const years = [...new Set(all.map((c) => c.startsOn.slice(0, 4)))].sort().reverse();
@@ -63,7 +65,7 @@ export function Campaigns() {
         {shown.map((c) => (
           <Link key={c.id} to={`/campaigns/${c.id}`} className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-line bg-surface p-5 hover:border-brand">
             <div className="min-w-0 flex-[1_1_18rem]">
-              <div className="flex flex-wrap items-center gap-2"><strong className="text-lg">{c.name}</strong><Badge tone={CAMPAIGN_STATUS[c.status][1]}>{CAMPAIGN_STATUS[c.status][0]}</Badge></div>
+              <div className="flex flex-wrap items-center gap-2"><strong className="text-lg">{c.name}</strong><Badge tone={CAMPAIGN_STATUS[c.status][1]}>{CAMPAIGN_STATUS[c.status][0]}</Badge>{alertsOf(c.id) && <Badge tone="danger">{alertsOf(c.id)!.alerts} إنذار</Badge>}</div>
               <span className="text-sm text-muted">{c.program} · من {formatDate(c.startsOn)} إلى {formatDate(c.endsOn)}{c.closedAt && ` · أُقفلت ${formatDate(c.closedAt)}`}</span>
             </div>
             <div className="min-w-48 flex-1">

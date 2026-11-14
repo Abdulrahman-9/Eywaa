@@ -8,6 +8,7 @@ import { ZodPipe } from '../common/zod.pipe';
 import {
   CampaignInput, campaignSchema, CheckInput, checkSchema, DistributionService, listFamiliesSchema, previewSchema, RedeemInput, redeemSchema, SyncInput, syncSchema,
 } from './distribution.service';
+import { MonitorService } from './monitor.service';
 
 const MANAGERS = ['ADMIN', 'DISTRIBUTION_MANAGER'] as const;
 const DESK = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR'] as const;
@@ -19,7 +20,7 @@ const manifestSchema = z.object({ pointId: z.string().uuid(), lane: z.coerce.num
 
 @Controller()
 export class DistributionController {
-  constructor(@Inject(DistributionService) private readonly dist: DistributionService) {}
+  constructor(@Inject(DistributionService) private readonly dist: DistributionService, @Inject(MonitorService) private readonly monitor: MonitorService) {}
 
   @Get('points')
   @Roles(...READERS)
@@ -57,6 +58,24 @@ export class DistributionController {
   @Roles(...MANAGERS)
   create(@Body(new ZodPipe(campaignSchema)) body: CampaignInput, @CurrentUser() user: AuthUser) {
     return this.dist.create(body, user);
+  }
+
+  @Get('campaign-alerts')
+  @Roles(...MANAGERS, 'AUDITOR')
+  openAlerts() {
+    return this.monitor.open();
+  }
+
+  @Get('campaigns/:id/daily')
+  @Roles(...READERS)
+  daily(@Param('id', ParseUUIDPipe) id: string) {
+    return this.monitor.daily(id);
+  }
+
+  @Get('campaigns/:id/alerts')
+  @Roles(...MANAGERS, 'AUDITOR', 'ACCOUNTANT')
+  alerts(@Param('id', ParseUUIDPipe) id: string) {
+    return this.monitor.alerts(id);
   }
 
   @Post('campaigns/preview')

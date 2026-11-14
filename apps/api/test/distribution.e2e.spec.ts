@@ -356,3 +356,88 @@ describe('صورة رب الأسرة عند الشبّاك', () => {
     expect((await sql("select count(*)::int as n from audit_log where action = 'attachment.view'")).rows[0].n).toBe(before + 1);
   });
 });
+
+describe('المتابعة اليومية وإنذارات الاحتيال', () => {
+  let camp: { id: string; toks: any[] };
+  const alerts = async () => (await get(`/campaigns/${camp.id}/alerts`, 'manager')).body as any[];
+  const kinds = async () => (await alerts()).map((a) => a.kind);
+
+  beforeAll(async () => {
+    await sql("update entitlements set status = 'CANCELLED', delivered_at = null, delivered_by = null, receiver = null where status in ('DELIVERED', 'PENDING')");
+    for (let i = 0; i < 4; i++) await approvedFamily({ proxies: [{ fullName: `وكيل ${i}` }] });
+    camp = await activeCampaign('حملة المراقبة');
+  });
+
+  it('حملة بلا مخالفات: لا إنذار، واللوحة اليومية فارغة', async () => {
+    expect(await alerts()).toEqual([]);
+    const d = (await get(`/campaigns/${camp.id}/daily`, 'distributor')).body;
+    expect(d).toMatchObject({ delivered: 0, days: [] });
+    expect(d.families).toBe(camp.toks.length);
+    expect((await get(`/campaigns/${camp.id}/alerts`, 'distributor')).status).toBe(403);
+  });
+
+  it('اللوحة اليومية: ما سُلِّم كل يوم لكل نقطة، والتراكم والنسبة', async () => {
+    for (const t of camp.toks.slice(0, 3)) expect((await redeem(t.token, p1)).status).toBe(200);
+    // تسليم من الثلاثة وقع أمس.
+    await sql("update entitlements set delivered_at = delivered_at - interval '1 day' where id = $1", [camp.toks[0].entitlementId]);
+    const d = (await get(`/campaigns/${camp.id}/daily`, 'manager')).body;
+    expect(d.days).toHaveLength(2);
+    expect(d.days.map((x: any) => [x.delivered, x.cumulative])).toEqual([[1, 1], [2, 3]]);
+    expect(d.days[1].points).toMatchObject([{ point: 'الجولان', delivered: 2 }]);
+    expect(d.days[1].percent).toBe(Math.round((3 / camp.toks.length) * 100));
+    expect(d).toMatchObject({ delivered: 3, remaining: camp.toks.length - 3 });
+  });
+
+  it('الرمز المستعمل يُعرض ثلاث مرات: إنذار باسم من عُرض أمامهم، وفي نقطتين: إنذار ثانٍ', async () => {
+    const t = camp.toks[0];
+    await redeem(t.token, p1);
+    await redeem(t.token, p1);
+    expect(await kinds()).toEqual([]);
+    await redeem(t.token, p2, 'distributor2');
+    const a = await alerts();
+    const rep = a.find((x) => x.kind === 'REPEATED_TOKEN');
+    expect(rep).toMatchObject({ severity: 'MEDIUM', familyNo: t.familyNo, title: 'رمز مستعمل عُرض 3 مرات' });
+    expect(rep.who).toContain('distributor2');
+    expect(a.find((x) => x.kind === 'MULTI_POINT').detail).toContain('الجولان');
+  });
+
+  it('خمسة رموز خاطئة من جهاز واحد في عشر دقائق: إنذار عالٍ؛ وأربعة لا تكفي', async () => {
+    const bad = (n: number) => post('/deliveries/check', 'distributor2', { pointId: p2, deviceId: 'phone-x', locate: { campaignId: camp.id, familyNo: camp.toks[5].familyNo, code: String(10000000 + n) } });
+    for (let i = 0; i < 4; i++) await bad(i);
+    expect(await kinds()).not.toContain('BAD_BURST');
+    await bad(4);
+    const b = (await alerts()).find((x) => x.kind === 'BAD_BURST');
+    expect(b).toMatchObject({ severity: 'HIGH', who: 'distributor2' });
+    expect(b.detail).toContain('phone-x');
+    // العالي يتقدّم القائمة.
+    expect((await alerts())[0].severity).toBe('HIGH');
+  });
+
+  it('خمسة رموز خاطئة متباعدة في الزمن ليست إنذاراً', async () => {
+    await sql("update delivery_incidents set at = at - (row_number * interval '11 minutes') from (select id, row_number() over (order by at) from delivery_incidents where device_id = 'phone-x') r where r.id = delivery_incidents.id");
+    expect(await kinds()).not.toContain('BAD_BURST');
+  });
+
+  it('تسليم في جوف الليل، واستلام بالوكالة فوق المعتاد: إنذاران باسم الموظف', async () => {
+    await sql("update entitlements set delivered_at = date_trunc('day', now() at time zone 'Asia/Baghdad') at time zone 'Asia/Baghdad' + interval '2 hours' where id = $1", [camp.toks[1].entitlementId]);
+    const night = (await alerts()).find((x) => x.kind === 'OFF_HOURS');
+    expect(night).toMatchObject({ who: 'distributor' });
+    expect(night.detail).toContain('1 تسليماً');
+    // عشرة تسليمات لموظف، سبعة منها بيد وكلاء؛ وزميله لا وكالة عنده.
+    await sql("update entitlements set status = 'DELIVERED', delivered_at = now(), delivered_by = (select id from users where username = 'distributor2'), receiver = 'HEAD', receiver_name = 'x', mode = 'ONLINE' where campaign_id = $1 and status = 'PENDING'", [camp.id]);
+    const mine = (await sql("select count(*)::int as n from entitlements e join users u on u.id = e.delivered_by where e.campaign_id = $1 and u.username = 'distributor2'", [camp.id])).rows[0].n;
+    if (mine >= 10) {
+      await sql("update entitlements set receiver = 'PROXY' where id in (select e.id from entitlements e join users u on u.id = e.delivered_by where e.campaign_id = $1 and u.username = 'distributor2' limit $2)", [camp.id, Math.ceil(mine * 0.7)]);
+      const p = (await alerts()).find((x) => x.kind === 'PROXY_HEAVY');
+      expect(p).toMatchObject({ who: 'distributor2' });
+      expect(p.detail).toMatch(/بيد وكلاء \(\d+%\)/);
+    }
+  });
+
+  it('الحملات الجارية التي فيها إنذارات تُعدّ للشارة', async () => {
+    const open = (await get('/campaign-alerts', 'manager')).body;
+    const row = open.find((c: any) => c.campaignId === camp.id);
+    expect(row.alerts).toBeGreaterThanOrEqual(3);
+    expect(row).toHaveProperty('high');
+  });
+});

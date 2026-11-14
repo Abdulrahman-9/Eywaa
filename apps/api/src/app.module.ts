@@ -14,6 +14,7 @@ import { ChangesService } from './changes/changes.service';
 import { DbModule } from './db/db.module';
 import { DistributionController } from './distribution/distribution.controller';
 import { DistributionService } from './distribution/distribution.service';
+import { MonitorService } from './distribution/monitor.service';
 import { DonorsService } from './donors/donors.service';
 import { FamiliesController } from './families/families.controller';
 import { FamiliesService } from './families/families.service';
@@ -48,7 +49,7 @@ import { UsersController } from './users/users.controller';
     FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController, PayoutsController, ReassessmentsController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, MessageWorker, InventoryService, AccountingService, DistributionService, HousingService, DonorsService, ReportsService, PayoutsService, ReassessmentsService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, MessageWorker, InventoryService, AccountingService, DistributionService, MonitorService, HousingService, DonorsService, ReportsService, PayoutsService, ReassessmentsService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

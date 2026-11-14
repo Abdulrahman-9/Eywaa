@@ -152,6 +152,25 @@ run(async ({ step, shot, newPage }) => {
     await mgr.getByText(/التذكير التالي بعد 12 ساعة/).waitFor();
   });
 
+  await step('المتابعة: الصرف يوماً بيوم، وإنذار حين يُعرض الرمز المستعمل ثلاث مرات', async () => {
+    const id = campaignUrl.split('/').pop();
+    await mgr.getByRole('heading', { name: 'الصرف يوماً بيوم' }).waitFor();
+    await mgr.getByText('سُلِّم 1 من 4، وبقي 3.').waitFor();
+    await mgr.getByText('لا شيء يلفت النظر').waitFor();
+    const toks = await call(`/campaigns/${id}/tokens`, tokens.manager);
+    const point = (await call(`/campaigns/${id}`, tokens.manager)).points[0].id;
+    // الرمز الذي سُلِّم به يُعرض ثلاث مرات أخرى: لم يبقَ في كشف الرموز، فيُؤخذ من رسالة العائلة رمزها الرقمي.
+    const code = /الرمز: (\d{8})/.exec((await call(`/families/${fams[2].id}/messages`, tokens.supervisor)).map((m) => m.text).join(' '))[1];
+    for (let i = 0; i < 3; i++) await call('/deliveries/check', tokens.distributor, { pointId: point, deviceId: 'desk', locate: { campaignId: id, familyNo: fams[2].familyNo, code } });
+    await mgr.reload();
+    await mgr.locator('[data-alert="REPEATED_TOKEN"]').getByText('رمز مستعمل عُرض 3 مرات').waitFor();
+    await shot(mgr, '51-campaign-alerts');
+    await mgr.getByRole('link', { name: 'حملات التوزيع' }).click();
+    await mgr.getByText('1 إنذار').waitFor();
+    await mgr.goBack();
+    assert.ok(toks.length >= 1);
+  });
+
   await step('الرجوع إلى حملة سابقة: تُوجد في «السابقة»، ويُستعلم عن عائلة فيها باسمها', async () => {
     await mgr.getByRole('button', { name: 'إقفال الحملة' }).click();
     await mgr.getByRole('dialog').getByRole('button', { name: /إقفال|أقفل/ }).click();

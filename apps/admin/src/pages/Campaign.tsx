@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { CampaignFamilies } from '../components/CampaignFamilies';
+import { CampaignMonitor } from '../components/CampaignMonitor';
 import { PAYOUT_READERS, Payouts } from '../components/Payouts';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
@@ -141,6 +142,8 @@ export function Campaign() {
       </section>
 
       <p className="rounded-lg border border-line bg-surface px-4 py-3"><span className="text-muted">كيف اختيرت عوائلها: </span>{describeSelection(c.selection ?? {}, c.unit).join(' · ')}</p>
+
+      {['ACTIVE', 'CLOSED'].includes(c.status) && <CampaignMonitor campaignId={id} live={c.status === 'ACTIVE'} canSeeAlerts={!!user && ['ADMIN', 'DISTRIBUTION_MANAGER', 'AUDITOR', 'ACCOUNTANT'].includes(user.role)} />}
 
       {c.fundId && ['ACTIVE', 'CLOSED'].includes(c.status) && user && PAYOUT_READERS.includes(user.role) && <Payouts campaignId={id} active={c.status === 'ACTIVE'} />}
 

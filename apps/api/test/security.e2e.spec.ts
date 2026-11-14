@@ -194,8 +194,10 @@ describe('حماية البيانات', () => {
   it('لا رقم وثيقة كاملاً في سجل التدقيق كله', async () => {
     const numbers = await sql('select number_enc from person_documents limit 1');
     expect(numbers.rows[0].number_enc).not.toMatch(/^\d+$/);
-    const leaks = await sql("select count(*)::int as n from audit_log where payload::text ~ '\\d{12}'");
-    expect(leaks.rows[0].n).toBe(0);
+    const rows = await sql("select action, payload::text as p from audit_log where payload::text ~ '\\d{12}'");
+    // آخر مقطع من معرّف UUID اثنا عشر خانة ست عشرية، وقد تقع كلها أرقاماً مصادفةً: ليست رقم وثيقة، فتُستثنى.
+    const leaks = rows.rows.filter((r) => /(?<![0-9a-f-])\d{12}(?![0-9a-f])/.test(r.p));
+    expect(leaks).toEqual([]);
   });
 
   it('السلسلة سليمة بعد كل ما سبق', async () => {
