@@ -12,6 +12,7 @@ import { age, formatDateTime, formatNumber } from '../lib/format';
 import { CHANGE_STATUS, CHANGE_TYPES, DOC_TYPES, FAMILY_STATUS, HOUSING, INCOME_KINDS, RELATIONS, TAGS } from '../lib/labels';
 import type { ChangeRequest, Family as FamilyT, ScoreLine } from '../lib/types';
 import { CLASS_AR } from './Scoring';
+import { Qr } from './Tokens';
 
 const DECIDERS = ['ADMIN', 'BENEFICIARY_SUPERVISOR'];
 const EDITORS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
@@ -60,6 +61,21 @@ export function Family() {
 
   return (
     <>
+      {/* بطاقة العائلة: لا تظهر إلا في الطباعة. تعريف بالعائلة، وليست رمز استلام. */}
+      <article aria-hidden="true" className="hidden w-[9.5cm] flex-col gap-3 rounded-xl border-2 border-black p-4 text-black print:flex">
+        <div className="flex items-center justify-between border-b border-black pb-2"><strong className="text-xl">إيواء</strong><span>بطاقة عائلة</span></div>
+        <div className="flex items-center gap-4">
+          <Qr value={f.familyNo} label="رقم العائلة" />
+          <div className="flex min-w-0 flex-col gap-1">
+            <strong className="text-lg leading-snug">{head?.fullName}</strong>
+            <span>رقم العائلة: <strong className="text-xl tabular-nums">{f.familyNo}</strong></span>
+            <span>الأفراد: <strong>{f.members.filter((m) => m.status === 'ACTIVE').length}</strong>{f.address.mahalla && <> · {f.address.mahalla}</>}</span>
+          </div>
+        </div>
+        <div className="text-sm">يستلم عنها: رب الأسرة{f.proxies.some((p) => p.active) && <>، أو {f.proxies.filter((p) => p.active).map((p) => p.fullName).join('، ')}</>}.</div>
+        <div className="border-t border-black pt-2 text-xs">هذه البطاقة تعريف بالعائلة. الاستلام برمز الحملة الذي يصلكم برسالة أو ببطاقة.</div>
+      </article>
+      <div className="contents print:hidden">
       <Card className="flex flex-wrap items-center gap-4">
         <div className="flex min-w-0 flex-[1_1_18rem] flex-col gap-1">
           <Link to="/families" className="text-sm font-semibold text-brand-strong">العوائل ←</Link>
@@ -71,6 +87,7 @@ export function Family() {
             {f.tags.map((t) => <Badge key={t}>{TAGS[t]}</Badge>)}
           </div>
         </div>
+        {f.status === 'APPROVED' && <Button variant="secondary" onClick={() => window.print()}>اطبع البطاقة</Button>}
         {canEdit && <Button variant="secondary" onClick={() => setDialog('change')}>طلب تعديل</Button>}
         {canDecide && !mine && (
           <>
@@ -213,6 +230,7 @@ export function Family() {
         <p>يبقى السجل للتاريخ، وتتحرر وثائقه لتسجيل لاحق صحيح.</p>
       </ReasonDialog>
       <ChangeDialog family={f} open={dialog === 'change'} onClose={() => setDialog(null)} />
+      </div>
     </>
   );
 }

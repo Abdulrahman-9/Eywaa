@@ -7,14 +7,14 @@ import { api } from '../lib/api';
 
 interface Token { entitlementId: string; serial: number; familyNo: string; headName: string; point: string; quantity: number; unit: string; token: string; code: string }
 
-function Qr({ value }: { value: string }) {
+export function Qr({ value, label = 'رمز الاستلام' }: { value: string; label?: string }) {
   const [svg, setSvg] = useState('');
   useEffect(() => {
     let live = true;
     QRCode.toString(value, { type: 'svg', errorCorrectionLevel: 'M', margin: 1 }).then((s) => { if (live) setSvg(s); });
     return () => { live = false; };
   }, [value]);
-  return <div role="img" aria-label="رمز الاستلام" className="size-36 flex-none" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <div role="img" aria-label={label} className="size-36 flex-none" dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
 /** بطاقات الاستلام للطباعة: لمن لا واتساب له، أو قبل أن تُربط الرسائل. */

@@ -7,7 +7,7 @@ import { Alert, Badge, Button, Card, PageHeader, Skeleton } from '../components/
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatDate, formatDateTime } from '../lib/format';
-import { CHANGE_TYPES, DOC_TYPES, fieldLabel, HOUSING } from '../lib/labels';
+import { CHANGE_TYPES, DOC_TYPES, RELATIONS, fieldLabel, HOUSING } from '../lib/labels';
 import type { ChangeRequest, Family, FamilyRow, OpenFlag } from '../lib/types';
 
 type Tab = 'approvals' | 'flags' | 'changes';
@@ -101,6 +101,8 @@ function payloadLines(c: ChangeRequest): string[] {
   if (c.type === 'SET_INCOMES') return [`${p.incomes.length} مصدر دخل، مجموعها ${p.incomes.reduce((s: number, i: { amountIqd: number }) => s + i.amountIqd, 0).toLocaleString('en-US')} دينار`];
   if (c.type === 'ADD_MEMBER') return [`إضافة: ${p.member.fullName}`];
   if (c.type === 'ADD_DOCUMENT') return [`${DOC_TYPES[p.document.type as keyof typeof DOC_TYPES]} ${p.document.number}`];
+  if (c.type === 'CHANGE_HEAD') return [`رب الأسرة الجديد: ${p.newHeadName}`, `السابق يصير: ${RELATIONS[p.formerHeadRelation as keyof typeof RELATIONS]}`];
+  if (c.type === 'TRANSFER_MEMBER') return [`يُنقل: ${p.personName}`, `إلى العائلة ${p.toFamilyNo} بصلة: ${RELATIONS[p.relation as keyof typeof RELATIONS]}`];
   if (c.type === 'SET_PROXIES') return [`الوكلاء: ${p.proxies.map((x: { fullName: string }) => x.fullName).join('، ') || 'لا أحد'}`];
   return Object.entries(p).filter(([k]) => k !== 'personId').map(([k, v]) => `${fieldLabel(k)}: ${v === null ? 'يُمحى' : v === true ? 'نعم' : v === false ? 'لا' : v === 'DECEASED' ? 'متوفى' : v === 'ACTIVE' ? 'حيّ' : HOUSING[v as keyof typeof HOUSING] ?? String(v)}`);
 }

@@ -7,7 +7,8 @@ import { DocumentFields, isDocComplete, type DocDraft } from './DocumentFields';
 import { useToast } from './toast';
 import { Alert, Button, Dialog, Field, Input, Select } from './ui';
 
-const TYPES: ChangeType[] = ['UPDATE_FAMILY', 'SET_INCOMES', 'UPDATE_MEMBER', 'ADD_MEMBER', 'ADD_DOCUMENT'];
+const TYPES: ChangeType[] = ['UPDATE_FAMILY', 'SET_INCOMES', 'UPDATE_MEMBER', 'ADD_MEMBER', 'ADD_DOCUMENT', 'CHANGE_HEAD', 'TRANSFER_MEMBER'];
+const NON_HEAD = Object.entries(RELATIONS).filter(([k]) => k !== 'HEAD');
 
 /** طلب تعديل على عائلة مسجَّلة. لا يسري حتى يعتمده موظف آخر. */
 export function ChangeDialog({ family, open, onClose }: { family: Family; open: boolean; onClose: () => void }) {
@@ -22,7 +23,11 @@ export function ChangeDialog({ family, open, onClose }: { family: Family; open: 
   const [added, setAdded] = useState({ fullName: '', relation: 'SON' as Relation, gender: 'M' as 'M' | 'F', birthDate: '' });
   const [doc, setDoc] = useState<DocDraft>({ type: 'NATIONAL_CARD', number: '' });
   const [docDup, setDocDup] = useState(false);
+  const [headChange, setHeadChange] = useState({ newHeadId: '', formerHeadRelation: 'OTHER' as Relation });
+  const [transfer, setTransfer] = useState({ personId: '', toFamilyNo: '', relation: 'SPOUSE' as Relation });
   const living = family.members.filter((m) => m.status === 'ACTIVE');
+  const others = family.members.filter((m) => m.relation !== 'HEAD');
+  const candidates = others.filter((m) => m.status === 'ACTIVE');
 
   useEffect(() => {
     if (!open) return;
@@ -33,6 +38,8 @@ export function ChangeDialog({ family, open, onClose }: { family: Family; open: 
     setPersonId(living[0]?.id ?? '');
     setAdded({ fullName: '', relation: 'SON', gender: 'M', birthDate: '' });
     setDoc({ type: 'NATIONAL_CARD', number: '' });
+    setHeadChange({ newHeadId: candidates[0]?.id ?? '', formerHeadRelation: 'OTHER' });
+    setTransfer({ personId: others[0]?.id ?? '', toFamilyNo: '', relation: 'SPOUSE' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, family.id]);
 
@@ -62,6 +69,11 @@ export function ChangeDialog({ family, open, onClose }: { family: Family; open: 
         return added.fullName.trim() ? { member: { ...added, fullName: added.fullName.trim(), birthDate: added.birthDate || undefined, documents: [] } } : null;
       case 'ADD_DOCUMENT':
         return personId && isDocComplete(doc) && !docDup ? { personId, document: doc } : null;
+      case 'CHANGE_HEAD':
+        return headChange.newHeadId ? headChange : null;
+      case 'TRANSFER_MEMBER':
+        return transfer.personId && /^\d{5,12}$/.test(transfer.toFamilyNo.trim()) && transfer.toFamilyNo.trim() !== family.familyNo
+          ? { ...transfer, toFamilyNo: transfer.toFamilyNo.trim() } : null;
       default:
         return null;
     }
@@ -137,6 +149,31 @@ export function ChangeDialog({ family, open, onClose }: { family: Family; open: 
           <Field label="المواليد">{(id) => <Input id={id} type="date" value={added.birthDate} onChange={(e) => setAdded({ ...added, birthDate: e.target.value })} />}</Field>
         </div>
       )}
+
+      {type === 'CHANGE_HEAD' && (candidates.length === 0 ? <Alert tone="warn">لا فرد حيّ في العائلة غير رب الأسرة. أضف الفرد أولاً.</Alert> : (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-3">
+          <Field label="رب الأسرة الجديد" hint="يلزم أن تكون له وثيقة هوية مسجَّلة.">
+            {(id) => <Select id={id} value={headChange.newHeadId} onChange={(e) => setHeadChange({ ...headChange, newHeadId: e.target.value })}>{candidates.map((m) => <option key={m.id} value={m.id}>{m.fullName}</option>)}</Select>}
+          </Field>
+          <Field label="صلة رب الأسرة السابق بالجديد" hint="إن توفي فسجّل وفاته بطلب «تغيير حال فرد».">
+            {(id) => <Select id={id} value={headChange.formerHeadRelation} onChange={(e) => setHeadChange({ ...headChange, formerHeadRelation: e.target.value as Relation })}>{NON_HEAD.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>}
+          </Field>
+        </div>
+      ))}
+
+      {type === 'TRANSFER_MEMBER' && (others.length === 0 ? <Alert tone="warn">ليس في العائلة غير رب الأسرة، ورب الأسرة لا يُنقل.</Alert> : (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
+          <Field label="الفرد المنقول">
+            {(id) => <Select id={id} value={transfer.personId} onChange={(e) => setTransfer({ ...transfer, personId: e.target.value })}>{others.map((m) => <option key={m.id} value={m.id}>{m.fullName}</option>)}</Select>}
+          </Field>
+          <Field label="رقم العائلة المنقول إليها">
+            {(id) => <Input id={id} inputMode="numeric" dir="ltr" value={transfer.toFamilyNo} onChange={(e) => setTransfer({ ...transfer, toFamilyNo: e.target.value })} />}
+          </Field>
+          <Field label="صلته برب أسرتها">
+            {(id) => <Select id={id} value={transfer.relation} onChange={(e) => setTransfer({ ...transfer, relation: e.target.value as Relation })}>{NON_HEAD.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>}
+          </Field>
+        </div>
+      ))}
 
       <Field label="سبب التعديل (لازم)">
         {(id) => <Input id={id} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثال: بطلب العائلة بعد انتقالها" />}

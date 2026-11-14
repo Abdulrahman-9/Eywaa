@@ -42,6 +42,7 @@ export type AttachmentCategory = keyof typeof ATTACHMENT_CATEGORIES;
 export const CHANGE_TYPES = {
   UPDATE_FAMILY: 'تعديل بيانات العائلة', SET_INCOMES: 'تعديل الدخل', SET_PROXIES: 'تبديل الوكلاء',
   ADD_MEMBER: 'إضافة فرد', UPDATE_MEMBER: 'تغيير حال فرد', ADD_DOCUMENT: 'إضافة وثيقة',
+  CHANGE_HEAD: 'تغيير رب الأسرة', TRANSFER_MEMBER: 'نقل فرد إلى عائلة أخرى',
 } as const;
 export type ChangeType = keyof typeof CHANGE_TYPES;
 

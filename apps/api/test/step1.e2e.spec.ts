@@ -282,6 +282,65 @@ describe('طلبات التعديل', () => {
     expect(proxies.find((p: any) => p.fullName === 'وكيل جديد').active).toBe(true);
   });
 
+  it('تغيير رب الأسرة: يلزمه وثيقة، ويعتمده غير طالبه، ويبقى للعائلة رب واحد', async () => {
+    const f = family();
+    f.members.push({ relation: 'SON', fullName: 'ابن بلا وثيقة', gender: 'M', documents: [] });
+    f.members.push({ relation: 'SPOUSE', fullName: 'زوجة بوثيقة', gender: 'F', documents: [{ type: 'NATIONAL_CARD', number: nationalNo() }] });
+    const created = await create(f);
+    const son = created.members.find((m: any) => m.relation === 'SON');
+    const wife = created.members.find((m: any) => m.relation === 'SPOUSE');
+    const head = created.members.find((m: any) => m.relation === 'HEAD');
+    const ask = (payload: any) => api().post(`/api/families/${created.id}/changes`).set(as('researcher'))
+      .send({ type: 'CHANGE_HEAD', payload, reason: 'وفاة رب الأسرة' });
+
+    expect((await ask({ newHeadId: son.id, formerHeadRelation: 'FATHER' })).status).toBe(400);
+    expect((await ask({ newHeadId: head.id, formerHeadRelation: 'FATHER' })).status).toBe(400);
+    expect((await ask({ newHeadId: wife.id, formerHeadRelation: 'HEAD' })).status).toBe(400);
+    const req = await ask({ newHeadId: wife.id, formerHeadRelation: 'SPOUSE' });
+    expect(req.status).toBe(201);
+    expect(req.body.payload.newHeadName).toBe('زوجة بوثيقة');
+
+    expect((await api().post(`/api/changes/${req.body.id}/approve`).set(as('researcher')).send({})).status).toBe(403);
+    expect((await api().post(`/api/changes/${req.body.id}/approve`).set(as('supervisor')).send({})).status).toBe(200);
+    const after = (await api().get(`/api/families/${created.id}`).set(as('auditor'))).body;
+    expect(after.members.filter((m: any) => m.relation === 'HEAD').map((m: any) => m.id)).toEqual([wife.id]);
+    expect(after.members.find((m: any) => m.id === head.id).relation).toBe('SPOUSE');
+    expect(after.headName ?? after.members.find((m: any) => m.relation === 'HEAD').fullName).toBe('زوجة بوثيقة');
+  });
+
+  it('نقل فرد إلى عائلة أخرى: العددان يتبعان، ووثيقته ومرفقه معه، ورب الأسرة لا يُنقل', async () => {
+    const docNo = nationalNo();
+    const f = family();
+    f.members.push({ relation: 'DAUGHTER', fullName: 'بنت تتزوج', gender: 'F', documents: [{ type: 'NATIONAL_CARD', number: docNo }] });
+    const from = await create(f);
+    const to = await create(family());
+    const girl = from.members.find((m: any) => m.relation === 'DAUGHTER');
+    const head = from.members.find((m: any) => m.relation === 'HEAD');
+    await api().post(`/api/families/${from.id}/attachments`).set(as('researcher'))
+      .field('category', 'IDENTITY').field('personId', girl.id).attach('file', JPEG, 'id.jpg');
+    const ask = (payload: any) => api().post(`/api/families/${from.id}/changes`).set(as('researcher'))
+      .send({ type: 'TRANSFER_MEMBER', payload, reason: 'زواج' });
+
+    expect((await ask({ personId: head.id, toFamilyNo: to.familyNo, relation: 'OTHER' })).status).toBe(400);
+    expect((await ask({ personId: girl.id, toFamilyNo: from.familyNo, relation: 'OTHER' })).status).toBe(400);
+    expect((await ask({ personId: girl.id, toFamilyNo: '9999999', relation: 'OTHER' })).status).toBe(400);
+    const req = await ask({ personId: girl.id, toFamilyNo: to.familyNo, relation: 'SPOUSE' });
+    expect(req.status).toBe(201);
+    expect(req.body.payload.personName).toBe('بنت تتزوج');
+    expect((await api().post(`/api/changes/${req.body.id}/approve`).set(as('supervisor')).send({})).status).toBe(200);
+
+    const a = (await api().get(`/api/families/${from.id}`).set(as('auditor'))).body;
+    const b = (await api().get(`/api/families/${to.id}`).set(as('auditor'))).body;
+    expect(a.members.length).toBe(1);
+    expect(b.members.length).toBe(2);
+    expect(b.members.find((m: any) => m.id === girl.id).relation).toBe('SPOUSE');
+    expect((await api().get(`/api/families/${to.id}/attachments`).set(as('auditor'))).body.length).toBe(1);
+    expect((await api().get(`/api/families/${from.id}/attachments`).set(as('auditor'))).body.length).toBe(0);
+    // وثيقتها ما زالت تمنع تسجيلها مرة ثانية، وتدلّ على عائلتها الجديدة.
+    const look = await api().post('/api/families/lookup/document').set(as('researcher')).send({ type: 'NATIONAL_CARD', number: docNo });
+    expect(look.body).toMatchObject({ found: true, familyNo: to.familyNo });
+  });
+
   it('السجل المرفوض لا يُعدَّل، وسلسلة التدقيق سليمة بعد كل ما سبق', async () => {
     const f = await create();
     await api().post(`/api/families/${f.id}/reject`).set(as('supervisor')).send({ note: 'خارج النطاق' });

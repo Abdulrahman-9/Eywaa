@@ -12,6 +12,8 @@ import { ScoringService } from '../scoring/scoring.service';
 
 const nullableText = z.string().trim().min(1).nullable().optional();
 
+const NON_HEAD = z.enum(['SPOUSE', 'SON', 'DAUGHTER', 'FATHER', 'MOTHER', 'BROTHER', 'SISTER', 'OTHER']);
+
 /** ما يجوز طلب تعديله، وصيغة كل طلب. */
 const PAYLOADS = {
   UPDATE_FAMILY: z
@@ -51,6 +53,8 @@ const PAYLOADS = {
     chronicIllness: nullableText,
   }),
   ADD_DOCUMENT: z.object({ personId: z.string().uuid(), document: documentSchema }),
+  CHANGE_HEAD: z.object({ newHeadId: z.string().uuid(), formerHeadRelation: NON_HEAD }),
+  TRANSFER_MEMBER: z.object({ personId: z.string().uuid(), toFamilyNo: z.string().trim().regex(/^\d{5,12}$/, 'رقم العائلة أرقام فقط'), relation: NON_HEAD }),
 } as const;
 export type ChangeType = keyof typeof PAYLOADS;
 export const CHANGE_TYPES = Object.keys(PAYLOADS) as [ChangeType, ...ChangeType[]];
@@ -100,10 +104,11 @@ export class ChangesService {
       const fam = await c.query('select status from families where id = $1', [familyId]);
       if (!fam.rows[0]) throw new NotFoundException('العائلة غير موجودة');
       if (fam.rows[0].status === 'REJECTED') throw new ConflictException('لا يُعدَّل سجل مرفوض');
-      await this.precheck(c, familyId, type, payload);
+      // الأسماء تُحفظ مع الطلب ليقرأها المعتمِد؛ والتنفيذ يعتمد المعرّفات وحدها.
+      const names = await this.precheck(c, familyId, type, payload);
       const { rows } = await c.query(
         'insert into change_requests (family_id, type, payload, reason, requested_by) values ($1,$2,$3,$4,$5) returning id',
-        [familyId, type, JSON.stringify(this.seal(type, payload)), reason, actor.id],
+        [familyId, type, JSON.stringify({ ...this.seal(type, payload), ...names }), reason, actor.id],
       );
       await this.audit.append(c, {
         actorId: actor.id, action: 'change.request', entity: 'change_request', entityId: rows[0].id,
@@ -115,7 +120,30 @@ export class ChangesService {
   }
 
   /** يُفحص عند الطلب وعند الاعتماد معاً: فقد تتغير الحال بينهما. */
-  private async precheck(c: PoolClient, familyId: string, type: ChangeType, payload: any) {
+  private async precheck(c: PoolClient, familyId: string, type: ChangeType, payload: any): Promise<Record<string, string>> {
+    if (type === 'CHANGE_HEAD') {
+      const { rows } = await c.query(
+        `select p.full_name, p.relation, p.status, exists (select 1 from person_documents d where d.person_id = p.id) as has_doc
+         from persons p where p.id = $1 and p.family_id = $2`,
+        [payload.newHeadId, familyId],
+      );
+      const p = rows[0];
+      if (!p) throw new BadRequestException('الفرد ليس من هذه العائلة');
+      if (p.relation === 'HEAD') throw new BadRequestException('هو رب الأسرة الآن');
+      if (p.status !== 'ACTIVE') throw new BadRequestException('لا يكون المتوفى رب أسرة');
+      if (!p.has_doc) throw new BadRequestException('يلزم لرب الأسرة وثيقة هوية. أضف وثيقته أولاً ثم اطلب التغيير');
+      return { newHeadName: p.full_name };
+    }
+    if (type === 'TRANSFER_MEMBER') {
+      const person = await c.query('select full_name, relation from persons where id = $1 and family_id = $2', [payload.personId, familyId]);
+      if (!person.rows[0]) throw new BadRequestException('الفرد ليس من هذه العائلة');
+      if (person.rows[0].relation === 'HEAD') throw new BadRequestException('رب الأسرة لا يُنقل. غيّر رب الأسرة أولاً');
+      const target = await c.query('select id, status from families where family_no = $1', [payload.toFamilyNo]);
+      if (!target.rows[0]) throw new BadRequestException('لا عائلة بهذا الرقم');
+      if (target.rows[0].id === familyId) throw new BadRequestException('الفرد في هذه العائلة أصلاً');
+      if (target.rows[0].status === 'REJECTED') throw new ConflictException('العائلة المنقول إليها سجلها مرفوض');
+      return { personName: person.rows[0].full_name };
+    }
     if (type === 'UPDATE_MEMBER' || type === 'ADD_DOCUMENT') {
       const p = await c.query('select 1 from persons where id = $1 and family_id = $2', [payload.personId, familyId]);
       if (!p.rowCount) throw new BadRequestException('الفرد ليس من هذه العائلة');
@@ -128,6 +156,7 @@ export class ChangesService {
       const conflicts = await this.families.findHardConflicts(c, docs, null);
       if (conflicts.length) throw this.families.conflictError(conflicts);
     }
+    return {};
   }
 
   async decide(id: string, approve: boolean, note: string | undefined, actor: AuthUser) {
@@ -229,6 +258,25 @@ export class ChangesService {
       case 'ADD_DOCUMENT':
         await this.families.insertDocument(c, p.personId, p.document);
         return null;
+      case 'CHANGE_HEAD': {
+        // السابق أولاً: القاعدة لا تقبل ربَّي أسرة في لحظة.
+        const former = await c.query(
+          `update persons set relation = $2 where family_id = $1 and relation = 'HEAD' returning id, full_name`,
+          [familyId, p.formerHeadRelation],
+        );
+        const next = await c.query(`select relation from persons where id = $1`, [p.newHeadId]);
+        await c.query(`update persons set relation = 'HEAD' where id = $1`, [p.newHeadId]);
+        return { formerHeadId: former.rows[0]?.id ?? null, formerHeadName: former.rows[0]?.full_name ?? null, newHeadWas: next.rows[0].relation };
+      }
+      case 'TRANSFER_MEMBER': {
+        const target = await c.query('select id from families where family_no = $1 for no key update', [p.toFamilyNo]);
+        const old = await c.query('select relation from persons where id = $1', [p.personId]);
+        await c.query('update persons set family_id = $2, relation = $3 where id = $1', [p.personId, target.rows[0].id, p.relation]);
+        // مرفقاته (هويته، تقريره الطبي) تتبعه إلى ملف عائلته الجديدة.
+        await c.query('update attachments set family_id = $2 where person_id = $1', [p.personId, target.rows[0].id]);
+        await this.scoring.recompute(c, target.rows[0].id);
+        return { fromFamilyId: familyId, toFamilyId: target.rows[0].id, relationWas: old.rows[0].relation };
+      }
     }
   }
 
