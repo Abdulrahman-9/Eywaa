@@ -83,8 +83,8 @@ export class FamiliesService {
              housing, housing_other, prev_address, prev_landmark,
              residence_card_no, residence_card_at, residence_card_by,
              ration_hash, ration_enc, ration_issued_at, ration_center,
-             lat, lng, notes, client_op_id, created_by)
-           values ($1,'PENDING_APPROVAL',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+             lat, lng, notes, client_op_id, created_by, has_whatsapp, prefers_voice)
+           values ($1,'PENDING_APPROVAL',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
            returning id`,
           [
             familyNo, input.tags, input.phone1 ?? null, input.phone2 ?? null,
@@ -96,7 +96,7 @@ export class FamiliesService {
             rationHash, input.rationCard ? this.crypto.encrypt(input.rationCard.number) : null,
             input.rationCard?.issuedAt ?? null, input.rationCard?.center ?? null,
             input.location?.lat ?? null, input.location?.lng ?? null, input.notes ?? null,
-            input.clientOpId ?? null, actor.id,
+            input.clientOpId ?? null, actor.id, input.hasWhatsapp, input.prefersVoice,
           ],
         );
         const id: string = fam.rows[0].id;
@@ -280,6 +280,8 @@ export class FamiliesService {
       tags: f.tags,
       phone1: f.phone1,
       phone2: f.phone2,
+      hasWhatsapp: f.has_whatsapp,
+      prefersVoice: f.prefers_voice,
       address: { mahalla: f.mahalla, street: f.street, house: f.house, landmark: f.landmark },
       housing: f.housing,
       housingOther: f.housing_other,

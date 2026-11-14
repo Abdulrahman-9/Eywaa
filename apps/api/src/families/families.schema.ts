@@ -75,6 +75,8 @@ export const createFamilySchema = z
     tags: z.array(z.enum(['ORPHANS', 'WIDOW', 'DISABLED', 'SICK', 'DIVORCED', 'NEEDY', 'UNMARRIED'])).default([]),
     phone1: phone.optional(),
     phone2: phone.optional(),
+    hasWhatsapp: z.boolean().default(true),
+    prefersVoice: z.boolean().default(false),
     address: z
       .object({ mahalla: optionalText, street: optionalText, house: optionalText, landmark: optionalText })
       .default({}),

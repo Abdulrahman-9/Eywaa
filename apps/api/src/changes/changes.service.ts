@@ -25,6 +25,8 @@ const PAYLOADS = {
       housing: z.enum(['OWNED', 'RENTED', 'OTHER']).optional(),
       housingOther: nullableText,
       notes: nullableText,
+      hasWhatsapp: z.boolean().optional(),
+      prefersVoice: z.boolean().optional(),
     })
     .refine((v) => Object.keys(v).length > 0, 'لا تعديل في الطلب'),
   SET_INCOMES: z.object({
@@ -55,6 +57,7 @@ export const CHANGE_TYPES = Object.keys(PAYLOADS) as [ChangeType, ...ChangeType[
 const FAMILY_COLUMNS: Record<string, string> = {
   tags: 'tags', phone1: 'phone1', phone2: 'phone2', mahalla: 'mahalla', street: 'street', house: 'house',
   landmark: 'landmark', housing: 'housing', housingOther: 'housing_other', notes: 'notes',
+  hasWhatsapp: 'has_whatsapp', prefersVoice: 'prefers_voice',
 };
 
 @Injectable()

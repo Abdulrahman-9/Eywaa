@@ -16,7 +16,7 @@ interface MemberDraft {
   hasDoc: boolean; doc: DocDraft;
 }
 interface Draft {
-  clientOpId: string; tags: Tag[]; phone1: string; phone2: string;
+  clientOpId: string; tags: Tag[]; phone1: string; phone2: string; hasWhatsapp: boolean; prefersVoice: boolean;
   mahalla: string; street: string; house: string; landmark: string;
   housing: Housing | ''; housingOther: string; prevAddress: string; prevLandmark: string;
   rationNumber: string; rationCenter: string; residenceNumber: string; residenceBy: string;
@@ -29,7 +29,7 @@ const emptyMember = (relation: Relation): MemberDraft => ({
   disability: '', chronicIllness: '', hasDoc: relation === 'HEAD', doc: { type: 'NATIONAL_CARD', number: '' },
 });
 const emptyDraft = (): Draft => ({
-  clientOpId: crypto.randomUUID(), tags: [], phone1: '', phone2: '', mahalla: '', street: '', house: '', landmark: '',
+  clientOpId: crypto.randomUUID(), tags: [], phone1: '', phone2: '', hasWhatsapp: true, prefersVoice: false, mahalla: '', street: '', house: '', landmark: '',
   housing: '', housingOther: '', prevAddress: '', prevLandmark: '', rationNumber: '', rationCenter: '',
   residenceNumber: '', residenceBy: '', members: [emptyMember('HEAD')], incomes: [], proxies: [], notes: '',
 });
@@ -51,7 +51,7 @@ function toPayload(d: Draft) {
   return {
     clientOpId: d.clientOpId,
     tags: d.tags,
-    phone1: opt(d.phone1), phone2: opt(d.phone2),
+    phone1: opt(d.phone1), phone2: opt(d.phone2), hasWhatsapp: d.hasWhatsapp ?? true, prefersVoice: d.prefersVoice ?? false,
     address: { mahalla: opt(d.mahalla), street: opt(d.street), house: opt(d.house), landmark: opt(d.landmark) },
     housing: d.housing || undefined, housingOther: opt(d.housingOther),
     prevAddress: opt(d.prevAddress), prevLandmark: opt(d.prevLandmark),
@@ -233,6 +233,10 @@ export function Register() {
             <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-3">
               <Field label="الهاتف">{(id) => <Input id={id} dir="ltr" inputMode="tel" placeholder="07XXXXXXXXX" value={draft.phone1} onChange={(e) => patch({ phone1: e.target.value })} />}</Field>
               <Field label="هاتف ثانٍ (اختياري)">{(id) => <Input id={id} dir="ltr" inputMode="tel" value={draft.phone2} onChange={(e) => patch({ phone2: e.target.value })} />}</Field>
+            </div>
+            <div className="flex flex-wrap gap-x-6 gap-y-1">
+              <label className="flex min-h-11 items-center gap-2"><input type="checkbox" className="size-5 accent-brand" checked={draft.hasWhatsapp ?? true} onChange={(e) => patch({ hasWhatsapp: e.target.checked })} />على هذا الهاتف واتساب</label>
+              <label className="flex min-h-11 items-center gap-2"><input type="checkbox" className="size-5 accent-brand" checked={draft.prefersVoice ?? false} onChange={(e) => patch({ prefersVoice: e.target.checked })} />لا يقرأ: يُبلَّغ بمكالمة</label>
             </div>
           </>
         )}

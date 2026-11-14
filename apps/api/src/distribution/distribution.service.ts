@@ -9,6 +9,7 @@ import { toAsciiDigits } from '../common/arabic';
 import { FieldCrypto } from '../common/crypto';
 import { Config } from '../config';
 import { CONFIG, Db } from '../db/db.module';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ProgramsService } from '../programs/programs.service';
 import { laneOf, Manifest } from './offline';
 import { TokenSigner, verifyToken } from './token';
@@ -63,6 +64,8 @@ const ENT_SQL = `
     left join persons h on h.family_id = f.id and h.relation = 'HEAD'
     join distribution_points ap on ap.id = e.point_id left join distribution_points dp on dp.id = e.delivered_point`;
 
+const INVITE = 'السلام عليكم {الاسم}. مستحقاتكم ({المقدار}) بانتظاركم في نقطة {النقطة} حتى {آخر_موعد}. أحضروا هذا الرمز: {الرمز_الرقمي}. رقم العائلة: {رقم_العائلة}';
+
 interface Station { actor: AuthUser; pointId: string; deviceId: string }
 
 /** معرّف الحملة كما يدّعيه رمز لم يصحّ توقيعه. يُستعمل للبلاغ فقط، ولا يوثق به. */
@@ -92,6 +95,7 @@ export class DistributionService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(ProgramsService) private readonly programs: ProgramsService,
     @Inject(AttachmentsService) private readonly attachments: AttachmentsService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {
     this.signer = new TokenSigner(config.TOKEN_SIGNING_SEED);
   }
@@ -233,7 +237,14 @@ export class DistributionService {
   }
 
   /** الاعتماد يصدر الرموز: لكل استحقاق رمز رقمي للرسائل النصية، والرمز الموقَّع يُشتق عند الطلب. */
-  decide(id: string, approve: boolean, note: string | undefined, actor: AuthUser) {
+  async decide(id: string, approve: boolean, note: string | undefined, actor: AuthUser) {
+    const result = await this.decideTx(id, approve, note, actor);
+    // دعوة الاستلام تخرج بعد ثبوت الاعتماد، ومعها الرمز الرقمي لكل عائلة.
+    if (approve) await this.notifications.system('CAMPAIGN_INVITE', `دعوة الاستلام: ${result.name}`, INVITE, { campaignId: id });
+    return result;
+  }
+
+  private decideTx(id: string, approve: boolean, note: string | undefined, actor: AuthUser) {
     return this.transition(id, actor, ['PENDING_APPROVAL'], async (c, row) => {
       if (row.created_by === actor.id) throw new ForbiddenException('لا يعتمد الموظف حملة أنشأها بنفسه');
       if (!approve && !note) throw new BadRequestException('يلزم ذكر سبب الرفض');
@@ -408,7 +419,17 @@ export class DistributionService {
       });
       return row.id as string;
     }));
+    await this.confirm(id);
     return this.delivered(id);
+  }
+
+  /** رسالة التأكيد بعد التسليم: إن لم تكن العائلة هي المستلمة علمت في حينه. */
+  private async confirm(entitlementId: string) {
+    const r = (await this.db.query(`${ENT_SQL} where e.id = $1`, [entitlementId])).rows[0];
+    if (!r || r.status !== 'DELIVERED') return;
+    const when = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(r.delivered_at));
+    const body = `السلام عليكم {الاسم}. استُلمت مستحقاتكم (${r.quantity} ${r.unit}) من نقطة ${r.delivered_point_name} في ${when}، واستلمها ${r.receiver === 'PROXY' ? 'وكيلكم' : 'رب الأسرة'} ${r.receiver_name}. إن لم تستلموها فراجعوا المركز فوراً. رقم العائلة: {رقم_العائلة}`;
+    await this.notifications.system('DELIVERY_CONFIRMATION', 'تأكيد التسليم', body, {}, r.family_id);
   }
 
   private async delivered(id: string) {
@@ -462,6 +483,7 @@ export class DistributionService {
         });
         return { result: 'APPLIED' as const };
       });
+      if (result.result === 'APPLIED') await this.confirm(item.entitlementId);
       results.push({ clientOpId: item.clientOpId, ...result });
     }
     return { applied: results.filter((r) => r.result === 'APPLIED').length, conflicts: results.filter((r) => r.result === 'CONFLICT').length, results };

@@ -14,6 +14,9 @@ import { DistributionController } from './distribution/distribution.controller';
 import { DistributionService } from './distribution/distribution.service';
 import { FamiliesController } from './families/families.controller';
 import { FamiliesService } from './families/families.service';
+import { Channels } from './notifications/channels';
+import { NotificationsController } from './notifications/notifications.controller';
+import { NotificationsService } from './notifications/notifications.service';
 import { ProgramsController } from './programs/programs.controller';
 import { ProgramsService } from './programs/programs.service';
 import { ScoringController } from './scoring/scoring.controller';
@@ -27,10 +30,10 @@ import { UsersController } from './users/users.controller';
   imports: [DbModule],
   controllers: [
     AuthController, UsersController, AuditController, SettingsController, StatsController,
-    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController,
+    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, DistributionService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, DistributionService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

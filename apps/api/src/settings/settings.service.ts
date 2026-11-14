@@ -10,6 +10,10 @@ export const SETTINGS = {
     label: 'خط الفقر: دخل الفرد الشهري بالدينار',
     schema: z.number().int().min(1).max(100_000_000),
   },
+  bulk_message_approval_threshold: {
+    label: 'عدد الرسائل الذي يحتاج ما فوقه اعتماداً',
+    schema: z.number().int().min(1).max(1_000_000),
+  },
 } as const;
 export type SettingKey = keyof typeof SETTINGS;
 
