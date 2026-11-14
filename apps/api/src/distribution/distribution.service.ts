@@ -45,13 +45,19 @@ export const selectionSchema = z.object({
   membersMax: z.number().int().min(1).max(50).optional(),
   tagsAny: z.array(z.enum(['ORPHANS', 'WIDOW', 'DISABLED', 'SICK', 'DIVORCED', 'NEEDY', 'UNMARRIED'])).min(1).optional(),
   mahallas: z.array(z.string().trim().min(1)).min(1).max(100).optional(),
+  /** مرات الاستفادة: لم تستلم أكثر من count مرة في آخر months شهراً. count = 0: لم تستفد قط في المدة. */
+  maxBenefits: z.object({ count: z.number().int().min(0).max(100), months: z.number().int().min(1).max(120), scope: z.enum(['PROGRAM', 'ALL']).default('PROGRAM') }).optional(),
+  /** لم تستلم شيئاً منذ هذا العدد من الأيام. */
+  notSinceDays: z.object({ days: z.number().int().min(1).max(3650), scope: z.enum(['PROGRAM', 'ALL']).default('PROGRAM') }).optional(),
   /** الأَولى فالأَولى: حين يضيق السقف يدخل من تقدّم في هذا الترتيب. */
-  order: z.enum(['POINTS', 'OLDEST', 'NEWEST', 'MEMBERS', 'FAMILY_NO']).default('FAMILY_NO'),
+  order: z.enum(['POINTS', 'OLDEST', 'NEWEST', 'MEMBERS', 'FAMILY_NO', 'LEAST_BENEFITED']).default('FAMILY_NO'),
   /** أقصى عدد العوائل. */
   limit: z.number().int().min(1).max(100000).optional(),
   /** أقصى مجموع المقادير (ما في المخزن أو الصندوق). */
   maxQuantity: z.number().int().min(1).optional(),
   include: familyNos,
+  /** من رشّحهم النظام لإكمال العدد وقبلهم المدير. يدخلون كالمضافين باليد، ويُحفظ أنهم ترشيح. */
+  nominated: familyNos,
   exclude: familyNos,
   /** لا تصفية آلية: الحملة ممن أُضيفوا باليد وحدهم. */
   manualOnly: z.boolean().default(false),
@@ -62,7 +68,14 @@ export const listFamiliesSchema = z.object({
   q: z.string().trim().optional(), status: z.enum(['PENDING', 'DELIVERED', 'CANCELLED']).optional(), pointId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100), offset: z.coerce.number().int().min(0).default(0),
 });
-interface Candidate { familyId: string; familyNo: string; headName: string; members: number; quantity: number; points: number | null; class: string | null; registeredAt: string; mahalla: string | null; manual?: boolean }
+interface Candidate {
+  familyId: string; familyNo: string; headName: string; members: number; quantity: number; points: number | null; class: string | null; registeredAt: string; mahalla: string | null; tags: string[];
+  /** تواريخ ما استلمته، من هذا البرنامج ومن كل البرامج، الأحدث أولاً. */
+  got: { program: number[]; all: number[] };
+  pickedBy?: 'RULE' | 'NOMINATED' | 'MANUAL';
+}
+const DAY = 86_400_000;
+const CLASS_LETTER = { A: 'أ', B: 'ب', C: 'ج', D: 'د' } as const;
 
 const locator = z.union([
   z.object({ token: z.string().min(10).max(1000) }),
@@ -185,10 +198,10 @@ export class DistributionService {
         [input.name, program.id, program.unit, input.startsOn, input.endsOn, actor.id, input.fundId ?? null, JSON.stringify(selection)],
       );
       await c.query(
-        `insert into entitlements (campaign_id, family_id, point_id, serial, quantity)
-         select $1, x.family_id, x.point_id, x.serial, x.quantity
-         from unnest($2::uuid[], $3::uuid[], $4::int[], $5::int[]) as x(family_id, point_id, serial, quantity)`,
-        [rows[0].id, list.map((e) => e.familyId), list.map((_, i) => input.pointIds[i % input.pointIds.length]), list.map((_, i) => i + 1), list.map((e) => e.quantity)],
+        `insert into entitlements (campaign_id, family_id, point_id, serial, quantity, picked_by)
+         select $1, x.family_id, x.point_id, x.serial, x.quantity, x.picked::pick_source
+         from unnest($2::uuid[], $3::uuid[], $4::int[], $5::int[], $6::text[]) as x(family_id, point_id, serial, quantity, picked)`,
+        [rows[0].id, list.map((e) => e.familyId), list.map((_, i) => input.pointIds[i % input.pointIds.length]), list.map((_, i) => i + 1), list.map((e) => e.quantity), list.map((e) => e.pickedBy ?? 'RULE')],
       );
       await this.audit.append(c, {
         actorId: actor.id, action: 'campaign.create', entity: 'campaign', entityId: rows[0].id,
@@ -211,85 +224,195 @@ export class DistributionService {
     );
     const skip = new Set(busy.rows.map((r) => r.family_id));
     const free = eligible.filter((e) => !skip.has(e.familyId));
+    const ids = free.map((e) => e.familyId);
     const extra = await this.db.query(
-      'select f.id, f.created_at, f.mahalla, sc.points, sc.class from families f left join family_scores sc on sc.family_id = f.id where f.id = any($1)', [free.map((e) => e.familyId)]);
+      'select f.id, f.created_at, f.mahalla, f.tags::text[] as tags, sc.points, sc.class from families f left join family_scores sc on sc.family_id = f.id where f.id = any($1)', [ids]);
+    const history = await this.db.query(
+      "select e.family_id, c.program_id, e.delivered_at from entitlements e join campaigns c on c.id = e.campaign_id where e.status = 'DELIVERED' and e.family_id = any($1) order by e.delivered_at desc", [ids]);
+    const got = new Map<string, { program: number[]; all: number[] }>();
+    for (const h of history.rows) {
+      const g = got.get(h.family_id) ?? { program: [], all: [] };
+      const t = new Date(h.delivered_at).getTime();
+      g.all.push(t);
+      if (h.program_id === program.id) g.program.push(t);
+      got.set(h.family_id, g);
+    }
     const by = new Map(extra.rows.map((r) => [r.id, r]));
     const rows: Candidate[] = free.map((e) => {
       const x = by.get(e.familyId);
-      return { ...e, points: x?.points ?? null, class: x?.class ?? null, registeredAt: new Date(x.created_at).toISOString(), mahalla: x?.mahalla ?? null };
+      return { ...e, points: x?.points ?? null, class: x?.class ?? null, registeredAt: new Date(x.created_at).toISOString(), mahalla: x?.mahalla ?? null, tags: x?.tags ?? [], got: got.get(e.familyId) ?? { program: [], all: [] } };
     });
     return { rows, eligible: eligible.length, busy: new Set(eligible.filter((e) => skip.has(e.familyId)).map((e) => e.familyNo)) };
   }
 
-  /** يطبّق الاختيار ويعيد المختارين بترتيبهم، وعدد من بقي بعد كل خطوة. */
-  private async select(program: { id: string; minGapDays: number; rules: any; amount: any }, sel: Selection) {
-    const { rows: free, eligible, busy } = await this.available(program);
-    const day = (iso: string) => iso.slice(0, 10);
-    const matches = (c: Candidate) =>
-      (!sel.classes || (!!c.class && (sel.classes as string[]).includes(c.class)))
-      && (sel.minPoints === undefined || (c.points ?? -1) >= sel.minPoints)
-      && (sel.maxPoints === undefined || (c.points ?? Infinity) <= sel.maxPoints)
-      && (!sel.registeredFrom || day(c.registeredAt) >= sel.registeredFrom)
-      && (!sel.registeredTo || day(c.registeredAt) <= sel.registeredTo)
-      && (sel.membersMin === undefined || c.members >= sel.membersMin)
-      && (sel.membersMax === undefined || c.members <= sel.membersMax)
-      && (!sel.mahallas || (!!c.mahalla && sel.mahallas.includes(c.mahalla)));
-    let pool = sel.manualOnly ? [] : free.filter(matches);
-    if (sel.tagsAny && pool.length) {
-      const t = await this.db.query('select id from families where id = any($1) and tags::text[] && $2', [pool.map((c) => c.familyId), sel.tagsAny]);
-      const ok = new Set(t.rows.map((r) => r.id));
-      pool = pool.filter((c) => ok.has(c.familyId));
+  /** القواعد التي تخالفها العائلة، بأسمائها. قائمة فارغة: تطابق الاختيار. */
+  private misses(c: Candidate, sel: Selection, now = Date.now()): string[] {
+    const out: string[] = [];
+    const day = c.registeredAt.slice(0, 10);
+    if (sel.classes && !(c.class && (sel.classes as string[]).includes(c.class))) out.push(`الفئة ${c.class ? CLASS_LETTER[c.class as keyof typeof CLASS_LETTER] : 'غير محسوبة'}`);
+    if (sel.minPoints !== undefined && (c.points ?? -1) < sel.minPoints) out.push(`نقاطها ${c.points ?? 0}`);
+    if (sel.maxPoints !== undefined && (c.points ?? Infinity) > sel.maxPoints) out.push(`نقاطها ${c.points}`);
+    if ((sel.registeredFrom && day < sel.registeredFrom) || (sel.registeredTo && day > sel.registeredTo)) out.push(`سُجّلت ${day}`);
+    if ((sel.membersMin !== undefined && c.members < sel.membersMin) || (sel.membersMax !== undefined && c.members > sel.membersMax)) out.push(`أفرادها ${c.members}`);
+    if (sel.mahallas && !(c.mahalla && sel.mahallas.includes(c.mahalla))) out.push(`محلتها ${c.mahalla ?? 'غير مذكورة'}`);
+    if (sel.tagsAny && !c.tags.some((t) => (sel.tagsAny as string[]).includes(t))) out.push('ليست من الأصناف المختارة');
+    if (sel.maxBenefits) {
+      const n = c.got[sel.maxBenefits.scope === 'ALL' ? 'all' : 'program'].filter((t) => t > now - sel.maxBenefits!.months * 30.44 * DAY).length;
+      if (n > sel.maxBenefits.count) out.push(`استفادت ${n} مرة في المدة`);
     }
-    const filtered = pool.length;
+    if (sel.notSinceDays) {
+      const last = c.got[sel.notSinceDays.scope === 'ALL' ? 'all' : 'program'][0];
+      if (last !== undefined && last > now - sel.notSinceDays.days * DAY) out.push(`استلمت قبل ${Math.floor((now - last) / DAY)} يوماً`);
+    }
+    return out;
+  }
+
+  /** ترتيب الأولوية. التساوي يُحسم بالأقل استفادةً ثم برقم العائلة، فالترتيب ثابت بين المعاينة والإنشاء. */
+  private rank(pool: Candidate[], order: Selection['order']) {
     const cmp: Record<Selection['order'], (a: Candidate, b: Candidate) => number> = {
       POINTS: (a, b) => (b.points ?? -1) - (a.points ?? -1),
       OLDEST: (a, b) => a.registeredAt.localeCompare(b.registeredAt),
       NEWEST: (a, b) => b.registeredAt.localeCompare(a.registeredAt),
       MEMBERS: (a, b) => b.members - a.members,
       FAMILY_NO: () => 0,
+      // من لم تستفد قط أولاً، ثم الأقل مرات، ثم الأبعد عهداً بآخر استلام.
+      LEAST_BENEFITED: (a, b) => a.got.all.length - b.got.all.length || (a.got.all[0] ?? 0) - (b.got.all[0] ?? 0),
     };
-    // التساوي يُحسم برقم العائلة، فالترتيب ثابت لا يتبدّل بين المعاينة والإنشاء.
-    pool.sort((a, b) => cmp[sel.order](a, b) || a.familyNo.localeCompare(b.familyNo));
-    const out = new Set(sel.exclude);
-    pool = pool.filter((c) => !out.has(c.familyNo));
-    const afterExclude = pool.length;
-    if (sel.limit !== undefined) pool = pool.slice(0, sel.limit);
+    return pool.sort((a, b) => cmp[order](a, b) || (order === 'FAMILY_NO' ? 0 : a.got.all.length - b.got.all.length) || a.familyNo.localeCompare(b.familyNo));
+  }
+
+  private cap(pool: Candidate[], sel: Selection): Candidate[] {
+    let out = sel.limit !== undefined ? pool.slice(0, sel.limit) : pool;
     if (sel.maxQuantity !== undefined) {
       let sum = 0;
       const kept: Candidate[] = [];
       // بالترتيب حتى يمتلئ السقف: من لا يسعه الباقي يقف عنده الاختيار، فلا يُتخطّى أَولى إلى من دونه.
-      for (const c of pool) { if (sum + c.quantity > sel.maxQuantity) break; sum += c.quantity; kept.push(c); }
-      pool = kept;
+      for (const c of out) { if (sum + c.quantity > sel.maxQuantity) break; sum += c.quantity; kept.push(c); }
+      out = kept;
     }
-    const capped = pool.length;
-    const chosen = [...pool];
+    return out;
+  }
+
+  /** يطبّق الاختيار ويعيد المختارين بترتيبهم، وعدد من بقي بعد كل خطوة. */
+  private async select(program: { id: string; minGapDays: number; rules: any; amount: any }, sel: Selection) {
+    const { rows: free, eligible, busy } = await this.available(program);
+    const out = new Set(sel.exclude);
+    const matched = sel.manualOnly ? [] : free.filter((c) => this.misses(c, sel).length === 0);
+    const filtered = matched.length;
+    const pool = this.rank(matched.filter((c) => !out.has(c.familyNo)), sel.order);
+    const afterExclude = pool.length;
+    const chosen: Candidate[] = this.cap(pool, sel).map((c) => ({ ...c, pickedBy: 'RULE' as const }));
+    const capped = chosen.length;
     const have = new Set(chosen.map((c) => c.familyNo));
     const freeBy = new Map(free.map((c) => [c.familyNo, c]));
     const rejected: { familyNo: string; reason: string }[] = [];
-    for (const no of [...new Set(sel.include)]) {
-      if (have.has(no)) continue;
-      const c = freeBy.get(no);
-      if (c) { chosen.push({ ...c, manual: true }); have.add(no); continue; }
-      const known = busy.has(no) ? 'استلمت من البرنامج قريباً أو لها فيه استحقاق قائم'
-        : (await this.db.query("select 1 from families where family_no = $1 and status = 'APPROVED'", [no])).rowCount ? 'لا تستحق بشروط البرنامج' : 'لا عائلة معتمدة بهذا الرقم';
-      rejected.push({ familyNo: no, reason: known });
-    }
+    const add = async (nos: string[], pickedBy: 'NOMINATED' | 'MANUAL') => {
+      for (const no of [...new Set(nos)]) {
+        if (have.has(no)) continue;
+        const c = freeBy.get(no);
+        if (c) { chosen.push({ ...c, pickedBy }); have.add(no); continue; }
+        const known = busy.has(no) ? 'استلمت من البرنامج قريباً أو لها فيه استحقاق قائم'
+          : (await this.db.query("select 1 from families where family_no = $1 and status = 'APPROVED'", [no])).rowCount ? 'لا تستحق بشروط البرنامج' : 'لا عائلة معتمدة بهذا الرقم';
+        rejected.push({ familyNo: no, reason: known });
+      }
+    };
+    await add(sel.nominated, 'NOMINATED');
+    await add(sel.include, 'MANUAL');
     return {
-      chosen, rejected,
-      funnel: { eligible, available: free.length, filtered, afterExclude, capped, manual: chosen.length - capped, final: chosen.length },
+      chosen, rejected, free, have,
+      funnel: { eligible, available: free.length, filtered, afterExclude, capped, nominated: chosen.filter((c) => c.pickedBy === 'NOMINATED').length, manual: chosen.filter((c) => c.pickedBy === 'MANUAL').length, final: chosen.length },
     };
   }
 
-  /** معاينة اختيار لم يُحفظ: كم يبقى بعد كل خطوة، ومن هم. لا تُنشئ شيئاً. */
+  /**
+   * التقريب: أقل إرخاء لقاعدة واحدة يسدّ النقص (أو أكثره)، مع ما يكسبه.
+   * كل اقتراح تعديل صريح في القواعد يراه المدير ويقبله؛ لا يُرخى شيء في الخفاء.
+   */
+  private relaxations(free: Candidate[], sel: Selection, have: Set<string>, gap: number) {
+    const out = new Set(sel.exclude);
+    const gain = (patch: Partial<Selection>) => {
+      const next = { ...sel, ...patch } as Selection;
+      for (const k of Object.keys(patch) as (keyof Selection)[]) if (patch[k] === undefined) delete next[k];
+      return free.filter((c) => !have.has(c.familyNo) && !out.has(c.familyNo) && this.misses(c, next).length === 0).length;
+    };
+    const tries: { label: string; patch: Record<string, unknown>; gain: number }[] = [];
+    const push = (label: string, patch: Partial<Selection>) => { const g = gain(patch); if (g > 0) tries.push({ label, patch: patch as Record<string, unknown>, gain: g }); };
+    /** أقرب قيمة للحدّ تكسب ما يسدّ النقص؛ فإن لم يسدّه شيء فأبعدها. */
+    const nearest = (values: number[], make: (v: number) => Partial<Selection>) => {
+      let best: number | undefined;
+      for (const v of values) { best = v; if (gain(make(v)) >= gap) break; }
+      return best;
+    };
+    const others = free.filter((c) => !have.has(c.familyNo) && !out.has(c.familyNo));
+    if (sel.minPoints !== undefined) {
+      const below = [...new Set(others.map((c) => c.points ?? 0).filter((p) => p < sel.minPoints!))].sort((a, b) => b - a);
+      const v = nearest(below, (x) => ({ minPoints: x }));
+      if (v !== undefined) push(`أقل النقاط من ${sel.minPoints} إلى ${v}`, { minPoints: v });
+    }
+    if (sel.membersMin !== undefined) {
+      const below = [...new Set(others.map((c) => c.members).filter((m) => m < sel.membersMin!))].sort((a, b) => b - a);
+      const v = nearest(below, (x) => ({ membersMin: x }));
+      if (v !== undefined) push(`أقل عدد الأفراد من ${sel.membersMin} إلى ${v}`, { membersMin: v });
+    }
+    if (sel.membersMax !== undefined) {
+      const above = [...new Set(others.map((c) => c.members).filter((m) => m > sel.membersMax!))].sort((a, b) => a - b);
+      const v = nearest(above, (x) => ({ membersMax: x }));
+      if (v !== undefined) push(`أكثر عدد الأفراد من ${sel.membersMax} إلى ${v}`, { membersMax: v });
+    }
+    if (sel.classes) for (const k of ['A', 'B', 'C', 'D'] as const) if (!sel.classes.includes(k)) push(`أضف الفئة ${CLASS_LETTER[k]}`, { classes: [...sel.classes, k] });
+    if (sel.mahallas) for (const m of [...new Set(others.map((c) => c.mahalla).filter((x): x is string => !!x && !sel.mahallas!.includes(x)))]) push(`أضف محلة ${m}`, { mahallas: [...sel.mahallas, m] });
+    if (sel.tagsAny) push('ألغِ شرط صنف العائلة', { tagsAny: undefined });
+    if (sel.registeredFrom || sel.registeredTo) push('ألغِ شرط تاريخ التسجيل', { registeredFrom: undefined, registeredTo: undefined });
+    if (sel.maxBenefits) push(`مرات الاستفادة من ${sel.maxBenefits.count} إلى ${sel.maxBenefits.count + 1}`, { maxBenefits: { ...sel.maxBenefits, count: sel.maxBenefits.count + 1 } });
+    if (sel.notSinceDays) {
+      const half = Math.max(1, Math.floor(sel.notSinceDays.days / 2));
+      push(`لم تستلم منذ ${half} يوماً بدل ${sel.notSinceDays.days}`, { notSinceDays: { ...sel.notSinceDays, days: half } });
+    }
+    // الأنفع أولاً: ما يسدّ النقص بأقل زيادة عليه، ثم الأكثر كسباً.
+    return tries.sort((a, b) => Number(b.gain >= gap) - Number(a.gain >= gap) || (a.gain >= gap ? a.gain - b.gain : b.gain - a.gain)).slice(0, 8);
+  }
+
+  /**
+   * الترشيح: مستحقو البرنامج الذين لم تشملهم القواعد، الأقرب إليها أولاً:
+   * الأقل مخالفةً للقواعد، ثم من لم تستفد قط، ثم الأبعد عهداً بالاستلام، ثم الأعلى نقاطاً. ولكلٍّ سببه.
+   */
+  private nominees(free: Candidate[], sel: Selection, have: Set<string>, count: number) {
+    const out = new Set(sel.exclude);
+    const now = Date.now();
+    return free.filter((c) => !have.has(c.familyNo) && !out.has(c.familyNo))
+      .map((c) => ({ c, miss: this.misses(c, sel, now) }))
+      .sort((a, b) => a.miss.length - b.miss.length || a.c.got.all.length - b.c.got.all.length || (a.c.got.all[0] ?? 0) - (b.c.got.all[0] ?? 0)
+        || (b.c.points ?? -1) - (a.c.points ?? -1) || a.c.familyNo.localeCompare(b.c.familyNo))
+      .slice(0, count)
+      .map(({ c, miss }) => ({
+        ...this.row(c),
+        why: [
+          c.got.all.length === 0 ? 'لم تستفد من المركز قط' : `آخر استلام قبل ${Math.floor((now - c.got.all[0]) / DAY)} يوماً`,
+          miss.length ? `خارج القواعد: ${miss.join('، ')}` : 'تطابق القواعد، وأخرجها السقف',
+        ].join(' · '),
+      }));
+  }
+
+  private row(c: Candidate) {
+    return {
+      familyNo: c.familyNo, headName: c.headName, members: c.members, points: c.points, class: c.class, registeredAt: c.registeredAt, mahalla: c.mahalla, quantity: c.quantity,
+      benefits: c.got.all.length, lastBenefitAt: c.got.all[0] ? new Date(c.got.all[0]).toISOString() : null, pickedBy: c.pickedBy ?? 'RULE', manual: c.pickedBy === 'MANUAL',
+    };
+  }
+
+  /** معاينة اختيار لم يُحفظ: كم يبقى بعد كل خطوة، ومن هم، وإن نقصوا عن العدد المستهدف فكيف يُكمَل. لا تُنشئ شيئاً. */
   async preview(programId: string, sel: Selection) {
     const program = await this.programs.get(programId);
     const r = await this.select(program, sel);
-    const { rows: free } = sel.manualOnly ? { rows: [] as Candidate[] } : await this.available(program);
+    // النقص عن العدد المستهدف. ما أُضيف بالترشيح واليد يسدّ منه.
+    const gap = sel.limit !== undefined && !sel.manualOnly ? Math.max(0, sel.limit - r.funnel.final) : 0;
     return {
-      unit: program.unit, funnel: r.funnel, rejected: r.rejected,
+      unit: program.unit, funnel: r.funnel, rejected: r.rejected, gap,
       quantity: r.chosen.reduce((s, c) => s + c.quantity, 0),
-      mahallas: [...new Set(free.map((c) => c.mahalla).filter(Boolean))].sort() as string[],
-      families: r.chosen.slice(0, 500).map((c) => ({ familyNo: c.familyNo, headName: c.headName, members: c.members, points: c.points, class: c.class, registeredAt: c.registeredAt, mahalla: c.mahalla, quantity: c.quantity, manual: !!c.manual })),
+      mahallas: [...new Set(r.free.map((c) => c.mahalla).filter(Boolean))].sort() as string[],
+      relaxations: gap ? this.relaxations(r.free, sel, r.have, gap) : [],
+      nominees: gap ? this.nominees(r.free, sel, r.have, Math.min(Math.max(gap, 10), 100)) : [],
+      families: r.chosen.slice(0, 500).map((c) => this.row(c)),
     };
   }
 
@@ -302,7 +425,7 @@ export class DistributionService {
     const args = [id, p.status ?? null, p.pointId ?? null, q, (q && normalizeName(q)) || null];
     const total = await this.db.query(`select count(*)::int as n from entitlements e join families f on f.id = e.family_id left join persons h on h.family_id = f.id and h.relation = 'HEAD' where ${where}`, args);
     const { rows } = await this.db.query(
-      `select e.id, e.status, e.quantity, e.serial, e.delivered_at, e.receiver, e.receiver_name, e.mode, f.id as family_id, f.family_no, f.phone1, h.full_name,
+      `select e.id, e.status, e.quantity, e.serial, e.picked_by, e.delivered_at, e.receiver, e.receiver_name, e.mode, f.id as family_id, f.family_no, f.phone1, h.full_name,
               ap.name as point, dp.name as delivered_point, u.username, e.proof_attachment is not null as has_proof
        from entitlements e join families f on f.id = e.family_id left join persons h on h.family_id = f.id and h.relation = 'HEAD'
          join distribution_points ap on ap.id = e.point_id left join distribution_points dp on dp.id = e.delivered_point left join users u on u.id = e.delivered_by
@@ -310,7 +433,7 @@ export class DistributionService {
     return {
       total: total.rows[0].n,
       rows: rows.map((r) => ({
-        entitlementId: r.id, familyId: r.family_id, familyNo: r.family_no, headName: r.full_name, hasPhone: !!r.phone1, status: r.status, quantity: r.quantity, point: r.point,
+        entitlementId: r.id, familyId: r.family_id, familyNo: r.family_no, headName: r.full_name, hasPhone: !!r.phone1, status: r.status, quantity: r.quantity, point: r.point, pickedBy: r.picked_by,
         deliveredAt: r.delivered_at, deliveredPoint: r.delivered_point, receiver: r.receiver, receiverName: r.receiver_name, mode: r.mode, by: r.username, hasProof: r.has_proof,
       })),
     };
@@ -338,7 +461,7 @@ export class DistributionService {
           `select p.point_id from (select distinct point_id from entitlements where campaign_id = $1) p
            order by (select count(*) from entitlements e where e.campaign_id = $1 and e.point_id = p.point_id), p.point_id limit 1`, [id])).rows[0].point_id;
         await tx.query(
-          'insert into entitlements (campaign_id, family_id, point_id, serial, quantity) values ($1,$2,$3,(select coalesce(max(serial), 0) + 1 from entitlements where campaign_id = $1),$4)',
+          "insert into entitlements (campaign_id, family_id, point_id, serial, quantity, picked_by) values ($1,$2,$3,(select coalesce(max(serial), 0) + 1 from entitlements where campaign_id = $1),$4,'MANUAL')",
           [id, c.familyId, point, c.quantity]);
         await this.audit.append(tx, { actorId: actor.id, action: 'campaign.add_family', entity: 'campaign', entityId: id, payload: { familyNo: no, quantity: c.quantity } });
       });

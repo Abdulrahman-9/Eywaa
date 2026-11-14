@@ -50,7 +50,7 @@ describe('اختيار عوائل الحملة', () => {
   it('بلا تصفية: كل مستحقي البرنامج، والمقدار بحسب عدد الأفراد', async () => {
     expect((await post('/campaigns/preview', 'distributor', { programId, selection: {} })).status).toBe(403);
     const p = await preview();
-    expect(p.funnel).toEqual({ eligible: 8, available: 8, filtered: 8, afterExclude: 8, capped: 8, manual: 0, final: 8 });
+    expect(p.funnel).toEqual({ eligible: 8, available: 8, filtered: 8, afterExclude: 8, capped: 8, nominated: 0, manual: 0, final: 8 });
     // 3 عوائل × 2 + 3 × 3 + 2 × 5
     expect(p.quantity).toBe(25);
     expect(p.unit).toBe('كغم');
@@ -107,6 +107,56 @@ describe('اختيار عوائل الحملة', () => {
     expect(refused.status).toBe(400);
     expect(refused.body.message).toContain('9999999');
     expect((await post('/campaigns', 'manager', { ...base(), name: 'لا أحد', selection: { membersMin: 40 } })).status).toBe(409);
+  });
+});
+
+describe('العدد المستهدف وإكماله', () => {
+  it('القواعد وافقت العدد أو زادت: لا نقص ولا اقتراح', async () => {
+    const p = await preview({ limit: 3, order: 'POINTS' });
+    expect(p.gap).toBe(0);
+    expect(p.relaxations).toEqual([]);
+    expect(p.nominees).toEqual([]);
+  });
+
+  it('القواعد نقصت عن العدد: يُعرض النقص، وأقل إرخاء يسدّه لكل قاعدة', async () => {
+    // المستهدف 5، ومن أفرادها 6 فأكثر في الجولان واحدة (السابعة).
+    const p = await preview({ limit: 5, membersMin: 6, mahallas: ['الجولان'] });
+    expect(p.funnel.final).toBe(1);
+    expect(p.gap).toBe(4);
+    const labels = p.relaxations.map((r: any) => `${r.label} = +${r.gain}`);
+    // الجولان فيها أيضاً 1 و2 أفراد: تنزيل الحدّ إلى 1 يكسب 2. وإضافة محلة تكسب ذوات الستة فأكثر فيها.
+    expect(labels).toContain('أقل عدد الأفراد من 6 إلى 1 = +2');
+    expect(labels).toContain('أضف محلة النزال = +1');
+    expect(labels).toContain('أضف محلة الشهداء = +1');
+    // كل اقتراح تعديل صريح: تطبيقه يعطي ما وُعد به.
+    for (const r of p.relaxations) {
+      const after = await preview({ limit: 5, membersMin: 6, mahallas: ['الجولان'], ...r.patch });
+      expect(after.funnel.final).toBe(1 + r.gain);
+    }
+  });
+
+  it('الإرخاء يقف عند أقرب قيمة تسدّ النقص، ولا يتجاوزها', async () => {
+    // المستهدف 3 ممن أفرادهم 7 فأكثر (اثنتان). أقرب حدّ يسدّ النقص: 6، لا 1.
+    const p = await preview({ limit: 3, membersMin: 7 });
+    expect(p.gap).toBe(1);
+    expect(p.relaxations[0]).toMatchObject({ label: 'أقل عدد الأفراد من 7 إلى 6', gain: 1, patch: { membersMin: 6 } });
+  });
+
+  it('الترشيح: الأقرب إلى القواعد أولاً ولكلٍّ سببه، وقبوله يدخله الحملة موسوماً', async () => {
+    const p = await preview({ limit: 4, membersMin: 7 });
+    expect(p.gap).toBe(2);
+    expect(p.nominees.length).toBeGreaterThanOrEqual(2);
+    // كلهم يخالفون قاعدة واحدة، ولم يستفد أحد: يتقدّم الأعلى نقاطاً.
+    const pts = p.nominees.map((n: any) => n.points);
+    expect([...pts].sort((a: number, b: number) => b - a)).toEqual(pts);
+    expect(p.nominees[0].why).toMatch(/^لم تستفد من المركز قط · خارج القواعد: أفرادها \d$/);
+    expect(p.nominees.some((n: any) => nos(p).includes(n.familyNo))).toBe(false);
+
+    const picked = p.nominees.slice(0, 2).map((n: any) => n.familyNo);
+    const done = await preview({ limit: 4, membersMin: 7, nominated: picked });
+    expect(done.gap).toBe(0);
+    expect(done.funnel).toMatchObject({ capped: 2, nominated: 2, manual: 0, final: 4 });
+    expect(done.families.filter((f: any) => f.pickedBy === 'NOMINATED').map((f: any) => f.familyNo).sort()).toEqual([...picked].sort());
   });
 });
 
@@ -218,5 +268,58 @@ describe('تحضير الحملة والاستعلام عنها', () => {
     expect((await get(`/campaigns/${id}/families?status=CANCELLED`, 'manager')).body.total).toBe(4);
     expect((await get(`/campaigns/${id}`, 'manager')).body.selection.order).toBe('POINTS');
     expect((await get('/audit/verify', 'admin')).body.ok).toBe(true);
+  });
+});
+
+describe('مرات الاستفادة', () => {
+  let other: string, got: string;
+
+  beforeAll(async () => {
+    // برنامج آخر بلا فاصل، لتُرى الاستفادة من «كل البرامج». والعائلة التي استلمت اللحم هي الوحيدة التي استفادت.
+    other = (await post('/programs', 'admin', { name: 'سلة', kind: 'IN_KIND', unit: 'سلة', rules: {}, amount: { type: 'FIXED', value: 1 }, minGapDays: 0 })).body.id;
+    got = (await sql("select f.family_no from entitlements e join families f on f.id = e.family_id where e.status = 'DELIVERED'")).rows[0].family_no;
+  });
+  const p2 = async (selection: any) => (await post('/campaigns/preview', 'manager', { programId: other, selection })).body;
+
+  it('«لم تستفد قط» من كل البرامج تُخرج من استلمت، ومن البرنامج نفسه لا تُخرجها', async () => {
+    expect(nos(await p2({}))).toHaveLength(8);
+    const never = await p2({ maxBenefits: { count: 0, months: 12, scope: 'ALL' } });
+    expect(nos(never)).toHaveLength(7);
+    expect(nos(never)).not.toContain(got);
+    expect(nos(await p2({ maxBenefits: { count: 0, months: 12, scope: 'PROGRAM' } }))).toHaveLength(8);
+    expect(nos(await p2({ maxBenefits: { count: 1, months: 12, scope: 'ALL' } }))).toHaveLength(8);
+  });
+
+  it('«لم تستلم منذ» تُخرج من استلمت حديثاً، وتُدخلها إن بعُد عهدها', async () => {
+    expect(nos(await p2({ notSinceDays: { days: 30, scope: 'ALL' } }))).not.toContain(got);
+    await sql("update entitlements set delivered_at = now() - interval '45 days' where status = 'DELIVERED'");
+    expect(nos(await p2({ notSinceDays: { days: 30, scope: 'ALL' } }))).toContain(got);
+    expect(nos(await p2({ notSinceDays: { days: 60, scope: 'ALL' } }))).not.toContain(got);
+  });
+
+  it('«الأقل استفادةً أولاً» تؤخّر من استلمت، والمعاينة تعرض مرات كلٍّ', async () => {
+    const p = await p2({ order: 'LEAST_BENEFITED' });
+    expect(nos(p)[7]).toBe(got);
+    expect(p.families[7]).toMatchObject({ benefits: 1 });
+    expect(p.families[7].lastBenefitAt).toBeTruthy();
+    expect(p.families[0]).toMatchObject({ benefits: 0, lastBenefitAt: null });
+    // والنقص يُقترح له إرخاء قاعدة المرات.
+    const short = await p2({ limit: 8, maxBenefits: { count: 0, months: 12, scope: 'ALL' } });
+    expect(short.gap).toBe(1);
+    expect(short.relaxations[0]).toMatchObject({ label: 'مرات الاستفادة من 0 إلى 1', gain: 1 });
+    expect(short.nominees[0]).toMatchObject({ familyNo: got });
+    expect(short.nominees[0].why).toContain('آخر استلام قبل 45 يوماً');
+  });
+
+  it('الحملة تحفظ كيف دخلت كل عائلة: بالقاعدة أو بالترشيح أو باليد', async () => {
+    const c = await post('/campaigns', 'manager', { programId: other, name: 'سلة مكمَّلة', startsOn: '2026-01-01', endsOn: '2099-12-31', pointIds: [pointA],
+      selection: { limit: 3, membersMin: 7, nominated: [fams[5].familyNo], include: [fams[0].familyNo] } });
+    expect(c.status).toBe(201);
+    const rows = (await get(`/campaigns/${c.body.id}/families`, 'manager')).body.rows;
+    const by = Object.fromEntries(rows.map((r: any) => [r.familyNo, r.pickedBy]));
+    expect(by[fams[6].familyNo]).toBe('RULE');
+    expect(by[fams[7].familyNo]).toBe('RULE');
+    expect(by[fams[5].familyNo]).toBe('NOMINATED');
+    expect(by[fams[0].familyNo]).toBe('MANUAL');
   });
 });

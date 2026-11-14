@@ -8,7 +8,7 @@ import { useToast } from './toast';
 import { Alert, Badge, Button, Card, Field, Input, Select } from './ui';
 
 interface Row {
-  entitlementId: string; familyId: string; familyNo: string; headName: string | null; hasPhone: boolean; status: 'PENDING' | 'DELIVERED' | 'CANCELLED'; quantity: number; point: string;
+  entitlementId: string; familyId: string; familyNo: string; headName: string | null; hasPhone: boolean; status: 'PENDING' | 'DELIVERED' | 'CANCELLED'; quantity: number; point: string; pickedBy: 'RULE' | 'NOMINATED' | 'MANUAL';
   deliveredAt: string | null; deliveredPoint: string | null; receiver: 'HEAD' | 'PROXY' | null; receiverName: string | null; mode: string | null; by: string | null; hasProof: boolean;
 }
 const PAGE = 50;
@@ -86,7 +86,7 @@ export function CampaignFamilies({ campaignId, campaignStatus, unit, points, can
             {rows.map((r) => (
               <tr key={r.entitlementId} className="border-b border-line align-top last:border-0">
                 <td className="p-2 font-semibold tabular-nums"><Link to={`/families/${r.familyId}`} className="text-brand-strong underline">{r.familyNo}</Link></td>
-                <td className="p-2">{r.headName ?? '—'}{!r.hasPhone && <div className="text-warn-ink">بلا هاتف: لا تصلها دعوة</div>}</td>
+                <td className="p-2">{r.headName ?? '—'}{r.pickedBy !== 'RULE' && <> <Badge tone="info">{r.pickedBy === 'NOMINATED' ? 'بالترشيح' : 'باليد'}</Badge></>}{!r.hasPhone && <div className="text-warn-ink">بلا هاتف: لا تصلها دعوة</div>}</td>
                 <td className="p-2 tabular-nums">{formatNumber(r.quantity)}</td>
                 <td className="p-2">{r.point}</td>
                 <td className="p-2">

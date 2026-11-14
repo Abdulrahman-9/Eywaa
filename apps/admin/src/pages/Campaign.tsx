@@ -17,7 +17,8 @@ import { ReconcileTable, type Reconcile } from './Warehouse';
 
 interface Selection {
   classes?: string[]; minPoints?: number; maxPoints?: number; registeredFrom?: string; registeredTo?: string; membersMin?: number; membersMax?: number;
-  tagsAny?: string[]; mahallas?: string[]; order?: keyof typeof ORDER_AR; limit?: number; maxQuantity?: number; include?: string[]; exclude?: string[]; manualOnly?: boolean;
+  tagsAny?: string[]; mahallas?: string[]; order?: keyof typeof ORDER_AR; limit?: number; maxQuantity?: number; include?: string[]; nominated?: string[]; exclude?: string[]; manualOnly?: boolean;
+  maxBenefits?: { count: number; months: number; scope: 'PROGRAM' | 'ALL' }; notSinceDays?: { days: number; scope: 'PROGRAM' | 'ALL' };
 }
 
 /** كيف اختيرت عوائل الحملة، بكلام يُقرأ: للمعتمِد اليوم، ولمن يرجع إليها بعد عام. */
@@ -30,8 +31,12 @@ function describeSelection(s: Selection, unit: string): string[] {
   if (s.registeredFrom || s.registeredTo) out.push(`سُجّلت ${s.registeredFrom ? `من ${formatDate(s.registeredFrom)} ` : ''}${s.registeredTo ? `حتى ${formatDate(s.registeredTo)}` : ''}`.trim());
   if (s.tagsAny?.length) out.push(s.tagsAny.map((t) => TAGS[t as keyof typeof TAGS]).join(' أو '));
   if (s.mahallas?.length) out.push(`المحلة: ${s.mahallas.join('، ')}`);
+  const scope = (x: 'PROGRAM' | 'ALL') => (x === 'ALL' ? 'من كل البرامج' : 'من هذا البرنامج');
+  if (s.maxBenefits) out.push(s.maxBenefits.count === 0 ? `لم تستفد ${scope(s.maxBenefits.scope)} في آخر ${s.maxBenefits.months} شهراً` : `استفادت ${s.maxBenefits.count} مرة على الأكثر ${scope(s.maxBenefits.scope)} في آخر ${s.maxBenefits.months} شهراً`);
+  if (s.notSinceDays) out.push(`لم تستلم ${scope(s.notSinceDays.scope)} منذ ${s.notSinceDays.days} يوماً`);
   if (!out.length) out.push('كل من يستحق البرنامج');
-  if (s.limit || s.maxQuantity) out.push(`بسقف ${[s.limit && `${formatNumber(s.limit)} عائلة`, s.maxQuantity && `${formatNumber(s.maxQuantity)} ${unit}`].filter(Boolean).join(' و')}، ${ORDER_AR[s.order ?? 'FAMILY_NO']}`);
+  if (s.limit || s.maxQuantity) out.push(`المستهدف ${[s.limit && `${formatNumber(s.limit)} عائلة`, s.maxQuantity && `${formatNumber(s.maxQuantity)} ${unit}`].filter(Boolean).join(' و')}، ${ORDER_AR[s.order ?? 'FAMILY_NO']}`);
+  if (s.nominated?.length) out.push(`أُكمل العدد بالترشيح: ${s.nominated.length}`);
   if (s.include?.length) out.push(`أُضيفت باليد: ${s.include.length}`);
   if (s.exclude?.length) out.push(`استُثنيت باليد: ${s.exclude.length}`);
   return out;
