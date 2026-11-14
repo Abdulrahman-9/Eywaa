@@ -6,6 +6,7 @@ import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, S
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatDate, formatNumber } from '../lib/format';
+import type { Fund } from './Cashbox';
 import type { Program } from './Programs';
 
 export const CAMPAIGN_STATUS = {
@@ -25,17 +26,20 @@ function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) 
   const queryClient = useQueryClient();
   const programs = useQuery({ queryKey: ['programs'], queryFn: () => api<Program[]>('/programs'), enabled: open });
   const points = useQuery({ queryKey: ['points'], queryFn: () => api<Point[]>('/points'), enabled: open });
-  const [form, setForm] = useState({ name: '', programId: '', startsOn: today(), endsOn: inDays(7), pointIds: [] as string[] });
+  const [form, setForm] = useState({ name: '', programId: '', fundId: '', startsOn: today(), endsOn: inDays(7), pointIds: [] as string[] });
   const [newPoint, setNewPoint] = useState('');
   const active = programs.data?.filter((p) => p.active) ?? [];
   const program = active.find((p) => p.id === form.programId);
+  const money = program?.kind === 'MONEY';
+  const funds = useQuery({ queryKey: ['accounting'], queryFn: () => api<{ funds: Fund[] }>('/accounting/summary'), enabled: open && money, retry: false });
+  const usable = funds.data?.funds.filter((x) => !x.programId || x.programId === form.programId) ?? [];
 
   const addPoint = useMutation({
     mutationFn: () => api<Point>('/points', { method: 'POST', body: { name: newPoint.trim() } }),
     onSuccess: (p) => { setNewPoint(''); setForm((f) => ({ ...f, pointIds: [...f.pointIds, p.id] })); queryClient.invalidateQueries({ queryKey: ['points'] }); },
   });
   const create = useMutation({
-    mutationFn: () => api<{ id: string }>('/campaigns', { method: 'POST', body: form }),
+    mutationFn: () => api<{ id: string }>('/campaigns', { method: 'POST', body: { ...form, fundId: money ? form.fundId : undefined } }),
     onSuccess: (c) => { toast('أُنشئت مسودة الحملة'); queryClient.invalidateQueries({ queryKey: ['campaigns'] }); onClose(); navigate(`/campaigns/${c.id}`); },
   });
 
@@ -51,6 +55,11 @@ function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) 
         )}
       </Field>
       {program && <p className="rounded-lg bg-brand-soft px-3 py-2">يستحقه الآن <strong>{formatNumber(program.eligibleFamilies)}</strong> عائلة، وحاجتها {formatNumber(program.eligibleQuantity)} {program.unit}. من استلم قريباً يُستثنى.</p>}
+      {money && (
+        <Field label="تُصرف من صندوق" hint="يُحجز مبلغ الحملة من المتاح فيه عند الاعتماد">
+          {(id) => <Select id={id} value={form.fundId} onChange={(e) => setForm({ ...form, fundId: e.target.value })}><option value="">اختر الصندوق</option>{usable.map((x) => <option key={x.id} value={x.id}>{x.name} (المتاح {formatNumber(x.available)})</option>)}</Select>}
+        </Field>
+      )}
       <Field label="اسم الحملة">{(id) => <Input id={id} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="مثال: السلة الغذائية لشهر كانون الأول" />}</Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="تبدأ">{(id) => <Input id={id} type="date" value={form.startsOn} onChange={(e) => setForm({ ...form, startsOn: e.target.value })} />}</Field>
@@ -73,7 +82,7 @@ function NewCampaign({ open, onClose }: { open: boolean; onClose: () => void }) 
       </fieldset>
       <div className="flex flex-wrap justify-end gap-3">
         <Button variant="secondary" onClick={onClose}>إلغاء</Button>
-        <Button disabled={!form.programId || form.name.trim().length < 3 || !form.pointIds.length || form.endsOn < form.startsOn || create.isPending} onClick={() => create.mutate()}>{create.isPending ? 'جارٍ الإنشاء…' : 'أنشئ المسودة'}</Button>
+        <Button disabled={!form.programId || (money && !form.fundId) || form.name.trim().length < 3 || !form.pointIds.length || form.endsOn < form.startsOn || create.isPending} onClick={() => create.mutate()}>{create.isPending ? 'جارٍ الإنشاء…' : 'أنشئ المسودة'}</Button>
       </div>
     </Dialog>
   );

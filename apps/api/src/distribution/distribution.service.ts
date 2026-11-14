@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { randomInt } from 'crypto';
 import { PoolClient } from 'pg';
 import { z } from 'zod';
+import { AccountingService } from '../accounting/accounting.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
@@ -22,6 +23,8 @@ export const campaignSchema = z.object({
   startsOn: date,
   endsOn: date,
   pointIds: z.array(z.string().uuid()).min(1).max(50),
+  /** الصندوق الذي تُصرف منه الحملة المالية. */
+  fundId: z.string().uuid().optional(),
 }).refine((c) => c.endsOn >= c.startsOn, 'تاريخ النهاية قبل البداية');
 export type CampaignInput = z.infer<typeof campaignSchema>;
 
@@ -98,6 +101,7 @@ export class DistributionService {
     @Inject(AttachmentsService) private readonly attachments: AttachmentsService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
     @Inject(InventoryService) private readonly inventory: InventoryService,
+    @Inject(AccountingService) private readonly accounting: AccountingService,
   ) {
     this.signer = new TokenSigner(config.TOKEN_SIGNING_SEED);
   }
@@ -128,6 +132,8 @@ export class DistributionService {
   async create(input: CampaignInput, actor: AuthUser) {
     const program = await this.programs.get(input.programId);
     if (!program.active) throw new ConflictException('البرنامج معطَّل');
+    if (program.kind === 'MONEY' && !input.fundId) throw new BadRequestException('الحملة المالية يلزمها صندوق تُصرف منه');
+    if (program.kind !== 'MONEY' && input.fundId) throw new BadRequestException('الصندوق للحملات المالية فقط');
     const points = await this.db.query('select id from distribution_points where id = any($1) and active', [input.pointIds]);
     if (points.rowCount !== new Set(input.pointIds).size) throw new BadRequestException('في النقاط المختارة نقطة غير موجودة أو معطَّلة');
 
@@ -146,8 +152,8 @@ export class DistributionService {
 
     const id = await this.db.tx(async (c) => {
       const { rows } = await c.query(
-        'insert into campaigns (name, program_id, unit, starts_on, ends_on, created_by) values ($1,$2,$3,$4,$5,$6) returning id',
-        [input.name, program.id, program.unit, input.startsOn, input.endsOn, actor.id],
+        'insert into campaigns (name, program_id, unit, starts_on, ends_on, created_by, fund_id) values ($1,$2,$3,$4,$5,$6,$7) returning id',
+        [input.name, program.id, program.unit, input.startsOn, input.endsOn, actor.id, input.fundId ?? null],
       );
       await c.query(
         `insert into entitlements (campaign_id, family_id, point_id, serial, quantity)
@@ -213,7 +219,7 @@ export class DistributionService {
     const sum = (key: string) => points.rows.reduce((s, r) => s + r[key], 0);
     return {
       id: c.id, name: c.name, status: c.status, unit: c.unit, program: c.program, startsOn: c.starts_on, endsOn: c.ends_on,
-      createdBy: c.created_by_username, createdAt: c.created_at, decidedBy: c.decided_by_username, decidedAt: c.decided_at, decisionNote: c.decision_note,
+      fundId: c.fund_id as string | null, createdBy: c.created_by_username, createdAt: c.created_at, decidedBy: c.decided_by_username, decidedAt: c.decided_at, decisionNote: c.decision_note,
       totals: { families: sum('assigned'), quantity: sum('quantity'), delivered: sum('delivered'), deliveredQuantity: sum('delivered_quantity'), byProxy: proxy.rows[0].n },
       points: points.rows.map((r) => ({ id: r.id, name: r.name, assigned: r.assigned, quantity: r.quantity, delivered: r.delivered, deliveredQuantity: r.delivered_quantity, lastDelivery: r.last_delivery })),
       recent: recent.rows.map((r) => ({ id: r.id, familyId: r.family_id, familyNo: r.family_no, receiver: r.receiver, receiverName: r.receiver_name, quantity: r.quantity, deliveredAt: r.delivered_at, mode: r.mode, point: r.point, by: r.username, hasProof: r.has_proof })),
@@ -251,6 +257,10 @@ export class DistributionService {
       if (row.created_by === actor.id) throw new ForbiddenException('لا يعتمد الموظف حملة أنشأها بنفسه');
       if (!approve && !note) throw new BadRequestException('يلزم ذكر سبب الرفض');
       if (approve) {
+        if (row.fund_id) {
+          const total = (await c.query('select coalesce(sum(quantity), 0)::bigint as t from entitlements where campaign_id = $1', [id])).rows[0].t;
+          await this.accounting.checkCampaignFund(c, row.fund_id, row.program_id, Number(total));
+        }
         const ents = await c.query('select e.id, f.family_no from entitlements e join families f on f.id = e.family_id where e.campaign_id = $1', [id]);
         const codes = ents.rows.map(() => String(randomInt(0, 100_000_000)).padStart(8, '0'));
         await c.query(
@@ -416,6 +426,7 @@ export class DistributionService {
         [row.id, actor.id, input.pointId, input.deviceId, input.receiver.kind, receiverName, input.clientOpId],
       );
       await this.inventory.issueForDelivery(c, { id: row.id, campaignId: row.campaign_id, programId: row.program_id, pointId: input.pointId, quantity: row.quantity, actorId: actor.id });
+      await this.accounting.disburseForDelivery(c, { entitlementId: row.id, campaignId: row.campaign_id, quantity: row.quantity, actorId: actor.id, familyNo: row.family_no });
       await this.audit.append(c, {
         actorId: actor.id, action: 'delivery.redeem', entity: 'entitlement', entityId: row.id,
         payload: { familyNo: row.family_no, campaignId: row.campaign_id, pointId: input.pointId, deviceId: input.deviceId, receiver: input.receiver.kind, receiverName, quantity: row.quantity },
@@ -481,6 +492,7 @@ export class DistributionService {
           );
         }
         await this.inventory.issueForDelivery(c, { id: row.id, campaignId: row.campaign_id, programId: row.program_id, pointId: st.pointId, quantity: row.quantity, actorId: actor.id });
+        await this.accounting.disburseForDelivery(c, { entitlementId: row.id, campaignId: row.campaign_id, quantity: row.quantity, actorId: actor.id, familyNo: row.family_no });
         await this.audit.append(c, {
           actorId: actor.id, action: 'delivery.sync', entity: 'entitlement', entityId: row.id,
           payload: { familyNo: row.family_no, campaignId: row.campaign_id, pointId: st.pointId, deviceId: st.deviceId, receiver: item.receiver, receiverName: item.receiverName, deliveredAt: at.toISOString() },

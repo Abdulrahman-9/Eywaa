@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { AccountingController } from './accounting/accounting.controller';
+import { AccountingService } from './accounting/accounting.service';
 import { AttachmentsController } from './attachments/attachments.controller';
 import { AttachmentsService } from './attachments/attachments.service';
 import { Storage } from './attachments/storage';
@@ -32,10 +34,10 @@ import { UsersController } from './users/users.controller';
   imports: [DbModule],
   controllers: [
     AuthController, UsersController, AuditController, SettingsController, StatsController,
-    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController,
+    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, InventoryService, DistributionService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, InventoryService, AccountingService, DistributionService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

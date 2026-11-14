@@ -1,4 +1,4 @@
-import { Body, ConflictException, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, ConflictException, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser, CurrentUser, ROLES, Roles } from '../auth/auth.guard';
@@ -26,6 +26,17 @@ export class UsersController {
   async list() {
     const { rows } = await this.db.query(
       'select id, username, full_name as "fullName", role, active, created_at as "createdAt" from users order by created_at',
+    );
+    return rows;
+  }
+
+  /** أسماء الموظفين الفعّالين في دور، لمن يحتاج اختيار موظف (كالمحاسب عند تسليم عهدة). */
+  @Get('brief')
+  @Roles('ADMIN', 'ACCOUNTANT', 'DISTRIBUTION_MANAGER', 'PROJECT_SUPERVISOR')
+  async brief(@Query('role') role?: string) {
+    const { rows } = await this.db.query(
+      'select id, username, full_name as "fullName", role from users where active and ($1::user_role is null or role = $1) order by full_name',
+      [ROLES.includes(role as never) ? role : null],
     );
     return rows;
   }
