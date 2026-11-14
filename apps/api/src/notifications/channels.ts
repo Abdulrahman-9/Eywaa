@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 
 export type Channel = 'WHATSAPP' | 'SMS' | 'VOICE';
-export interface SendResult { ok: boolean; providerRef?: string; error?: string }
+/** retry: عطل عابر (شبكة، ضغط على المزوّد) تُعاد بعده المحاولة؛ وبدونه الإخفاق نهائي لهذه القناة. */
+export interface SendResult { ok: boolean; providerRef?: string; error?: string; retry?: boolean }
 
 /** مزوّد قناة. ربط مزوّد حقيقي (واتساب للأعمال، رسائل نصية، مكالمات) يكون بتنفيذ هذه الواجهة. */
 export interface ChannelDriver {
@@ -25,10 +26,51 @@ export class SimulatedDriver implements ChannelDriver {
   }
 }
 
+/**
+ * مزوّد عبر بوّابة HTTP: يرسل كل رسالة طلباً إلى عنوان يُضبط في الإعداد.
+ * الطلب:  POST <العنوان>  بترويسة Authorization: Bearer <الرمز>  وجسم {"channel","to","text"}
+ * الجواب: 2xx وفيه {"id": "..."} نجاح؛ 429 أو 5xx أو انقطاع: عطل عابر يُعاد بعده؛ وغيرها إخفاق نهائي.
+ * أكثر بوّابات الرسائل تقبل هذا الشكل أو يُكتب لها وسيط صغير يحوّله.
+ */
+export class HttpGatewayDriver implements ChannelDriver {
+  readonly name: string;
+  readonly live = true;
+
+  constructor(private readonly url: string, private readonly token: string, private readonly channels: Channel[], private readonly timeoutMs = 15_000) {
+    this.name = `بوّابة ${new URL(url).host}`;
+  }
+
+  async send(channel: Channel, phone: string, text: string): Promise<SendResult> {
+    if (!this.channels.includes(channel)) return { ok: false, error: 'القناة غير مفعَّلة عند المزوّد' };
+    let res: Response;
+    try {
+      res = await fetch(this.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` },
+        body: JSON.stringify({ channel, to: phone, text }),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (err) {
+      return { ok: false, retry: true, error: `تعذّر بلوغ المزوّد: ${(err as Error).message}` };
+    }
+    const data = (await res.json().catch(() => null)) as { id?: unknown; error?: unknown; message?: unknown } | null;
+    if (res.ok) return { ok: true, providerRef: data?.id === undefined ? undefined : String(data.id) };
+    const reason = String(data?.error ?? data?.message ?? `HTTP ${res.status}`).slice(0, 200);
+    return { ok: false, retry: res.status === 429 || res.status >= 500, error: reason };
+  }
+}
+
+/** يختار المزوّد من الإعداد: بوّابة حقيقية إن ضُبط عنوانها ورمزها، وإلا المحاكاة. */
+export function driverFromEnv(env: NodeJS.ProcessEnv = process.env): ChannelDriver {
+  if (!env.MSG_GATEWAY_URL || !env.MSG_GATEWAY_TOKEN) return new SimulatedDriver();
+  const channels = (env.MSG_GATEWAY_CHANNELS ?? 'SMS').split(',').map((c) => c.trim().toUpperCase()).filter((c): c is Channel => ['WHATSAPP', 'SMS', 'VOICE'].includes(c));
+  return new HttpGatewayDriver(env.MSG_GATEWAY_URL, env.MSG_GATEWAY_TOKEN, channels);
+}
+
 /** حامل المزوّد الحالي، ليُستبدل دون تغيير بقية النظام. */
 @Injectable()
 export class Channels {
-  private driver: ChannelDriver = new SimulatedDriver();
+  private driver: ChannelDriver = driverFromEnv();
 
   get current(): ChannelDriver {
     return this.driver;

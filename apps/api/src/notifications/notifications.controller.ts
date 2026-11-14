@@ -1,11 +1,14 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { createHash, timingSafeEqual } from 'crypto';
 import { z } from 'zod';
-import { AuthUser, CurrentUser, Roles } from '../auth/auth.guard';
+import { AuthUser, CurrentUser, Public, Roles } from '../auth/auth.guard';
 import { ZodPipe } from '../common/zod.pipe';
 import { ComposeInput, composeSchema, NotificationsService } from './notifications.service';
 
 const SENDERS = ['ADMIN', 'DISTRIBUTION_MANAGER', 'BENEFICIARY_SUPERVISOR'] as const;
 const noteSchema = z.object({ note: z.string().trim().min(1).optional() });
+const statusSchema = z.object({ id: z.string().min(1).max(200), status: z.enum(['delivered', 'read', 'failed']), error: z.string().max(300).optional() });
+const digest = (v: string) => createHash('sha256').update(v).digest();
 
 @Controller()
 export class NotificationsController {
@@ -15,6 +18,20 @@ export class NotificationsController {
   @Roles(...SENDERS, 'AUDITOR')
   list() {
     return this.notifications.list();
+  }
+
+  /**
+   * يناديه المزوّد حين تبلغ الرسالة الهاتف أو تُقرأ أو تخفق. لا جلسة له؛ إذنه سرّ مشترك في الترويسة.
+   * إن لم يُضبط السرّ فالنقطة غير موجودة.
+   */
+  @Public()
+  @Post('notifications/provider-status')
+  @HttpCode(200)
+  async providerStatus(@Headers('x-gateway-secret') secret: string | undefined, @Body(new ZodPipe(statusSchema)) body: z.infer<typeof statusSchema>) {
+    const expected = process.env.MSG_CALLBACK_SECRET;
+    if (!expected || !secret || !timingSafeEqual(digest(secret), digest(expected))) throw new NotFoundException();
+    const known = await this.notifications.providerStatus(body.id, body.status.toUpperCase() as 'DELIVERED' | 'READ' | 'FAILED', body.error);
+    return { ok: true, known };
   }
 
   @Get('notifications/driver')

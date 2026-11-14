@@ -27,6 +27,12 @@ services:
       FIELD_ENC_KEY: ${FIELD_ENC_KEY:?}
       FIELD_HMAC_KEY: ${FIELD_HMAC_KEY:?}
       TOKEN_SIGNING_SEED: ${TOKEN_SIGNING_SEED:?}
+      # مزوّد الرسائل. إن تُركت فارغة بقي النظام على المحاكاة: يسجّل ولا يرسل.
+      MSG_GATEWAY_URL: ${MSG_GATEWAY_URL:-}
+      MSG_GATEWAY_TOKEN: ${MSG_GATEWAY_TOKEN:-}
+      MSG_GATEWAY_CHANNELS: ${MSG_GATEWAY_CHANNELS:-SMS}
+      MSG_RATE_PER_SEC: ${MSG_RATE_PER_SEC:-10}
+      MSG_CALLBACK_SECRET: ${MSG_CALLBACK_SECRET:-}
     volumes:
       - storage:/data/storage
 

@@ -22,6 +22,7 @@ import { HousingService } from './housing/housing.service';
 import { InventoryController } from './inventory/inventory.controller';
 import { InventoryService } from './inventory/inventory.service';
 import { Channels } from './notifications/channels';
+import { MessageWorker } from './notifications/message.worker';
 import { NotificationsController } from './notifications/notifications.controller';
 import { NotificationsService } from './notifications/notifications.service';
 import { PayoutsController } from './payouts/payouts.controller';
@@ -44,7 +45,7 @@ import { UsersController } from './users/users.controller';
     FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController, PayoutsController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, InventoryService, AccountingService, DistributionService, HousingService, DonorsService, ReportsService, PayoutsService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, MessageWorker, InventoryService, AccountingService, DistributionService, HousingService, DonorsService, ReportsService, PayoutsService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

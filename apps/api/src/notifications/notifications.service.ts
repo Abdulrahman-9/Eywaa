@@ -4,7 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
 import { FieldCrypto } from '../common/crypto';
 import { Db } from '../db/db.module';
-import { chainFor, Channel, Channels, render, unknownVariables } from './channels';
+import { SendResult, chainFor, Channel, Channels, render, unknownVariables } from './channels';
 
 export const audienceSchema = z.object({
   campaignId: z.string().uuid().optional(),
@@ -29,6 +29,8 @@ interface Recipient {
   point?: string; endsOn?: string; quantity?: number; unit?: string; codeEnc?: string;
 }
 
+/** مهلة إعادة المحاولة بعد العطل العابر، بالدقائق: دقيقة، ثم خمس، ثم ثلاثون. بعدها تُعدّ الرسالة مخفقة. */
+const RETRY_AFTER_MIN = [1, 5, 30];
 const dateAr = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' });
 
 @Injectable()
@@ -101,29 +103,70 @@ export class NotificationsService {
     };
   }
 
-  /** يرسل إلى كل عائلة بترتيب قنواتها: إن أخفقت قناة جُرِّبت التي بعدها. */
+  /**
+   * يكتب رسالة لكل عائلة في الطابور. الكتابة دفعة واحدة، والإرسال بعدها:
+   * مع المحاكاة يُرسل في الحال، ومع مزوّد حقيقي يرسله العامل بسرعة محدودة (انظر processQueue).
+   */
   private async deliver(notificationId: string, body: string, list: Recipient[]) {
+    const rows = list.map((r) => ({ familyId: r.familyId, phone: r.phone ?? null, text: this.textFor(body, r), chain: r.phone ? chainFor(r) : [] }));
+    for (let i = 0; i < rows.length; i += 1000) {
+      const part = rows.slice(i, i + 1000);
+      await this.db.query(
+        `insert into messages (notification_id, family_id, phone, text, status, chain, next_attempt_at)
+         select $1, f, p, t, (case when p is null then 'NO_PHONE' else 'QUEUED' end)::message_status, c::message_channel[], case when p is null then null else now() end
+         from unnest($2::uuid[], $3::text[], $4::text[], $5::text[]) as x(f, p, t, c)`,
+        [notificationId, part.map((r) => r.familyId), part.map((r) => r.phone), part.map((r) => r.text), part.map((r) => `{${r.chain.join(',')}}`)],
+      );
+    }
+    if (!this.channels.current.live) while ((await this.processQueue(500, notificationId)) > 0);
+  }
+
+  /**
+   * يأخذ من الطابور حتى limit رسالة حان وقتها ويرسلها. يعيد عدد ما أخذ.
+   * الأخذ «إعارة» عشر دقائق: إن مات الخادم والرسالة بيده عادت إلى الطابور بعدها.
+   * فالضمان «مرة على الأقل»: إن قبلها المزوّد ومات الخادم قبل أن يسجّل، أُرسلت ثانية.
+   */
+  async processQueue(limit: number, notificationId?: string): Promise<number> {
     const driver = this.channels.current;
-    for (const r of list) {
-      const text = this.textFor(body, r);
-      if (!r.phone) {
-        await this.db.query("insert into messages (notification_id, family_id, text, status) values ($1,$2,$3,'NO_PHONE')", [notificationId, r.familyId, text]);
-        continue;
-      }
+    const { rows } = await this.db.query(
+      `update messages m set attempts = attempts + 1, next_attempt_at = now() + interval '10 minutes'
+       where m.id in (select id from messages where status = 'QUEUED' and next_attempt_at <= now() and ($2::uuid is null or notification_id = $2)
+                      order by next_attempt_at limit $1 for update skip locked)
+       returning m.id, m.phone, m.text, m.chain::text[] as chain, m.attempts`,
+      [limit, notificationId ?? null],
+    );
+    for (const m of rows) {
       const tried: Channel[] = [];
       let sent: { channel: Channel; ref?: string } | null = null;
       let error: string | undefined;
-      for (const channel of chainFor(r)) {
+      let transient = false;
+      // بترتيب القنوات: إن أخفقت قناة جُرِّبت التي بعدها.
+      for (const channel of m.chain as Channel[]) {
         tried.push(channel);
-        const res = await driver.send(channel, r.phone, text).catch((e: Error) => ({ ok: false, error: e.message, providerRef: undefined }));
+        const res: SendResult = await driver.send(channel, m.phone, m.text).catch((e: Error) => ({ ok: false, error: e.message, retry: true }));
         if (res.ok) { sent = { channel, ref: res.providerRef }; break; }
         error = res.error ?? 'أخفق الإرسال';
+        transient ||= !!res.retry;
       }
-      await this.db.query(
-        'insert into messages (notification_id, family_id, phone, channel, text, status, tried, error, provider_ref) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-        [notificationId, r.familyId, r.phone, sent?.channel ?? tried[tried.length - 1], text, sent ? 'SENT' : 'FAILED', tried, sent ? null : error, sent?.ref ?? null],
-      );
+      if (sent) {
+        await this.db.query("update messages set status = 'SENT', channel = $2, tried = $3, provider_ref = $4, error = null, next_attempt_at = null, sent_at = now() where id = $1", [m.id, sent.channel, tried, sent.ref ?? null]);
+      } else if (transient && m.attempts < RETRY_AFTER_MIN.length + 1) {
+        // عطل عابر: تعود إلى الطابور بعد مهلة تطول مع كل محاولة.
+        await this.db.query("update messages set tried = $2, error = $3, next_attempt_at = now() + make_interval(mins => $4) where id = $1", [m.id, tried, error, RETRY_AFTER_MIN[m.attempts - 1]]);
+      } else {
+        await this.db.query("update messages set status = 'FAILED', channel = $2, tried = $3, error = $4, next_attempt_at = null where id = $1", [m.id, tried[tried.length - 1] ?? null, tried, error ?? 'لا قناة لهذه العائلة']);
+      }
     }
+    return rows.length;
+  }
+
+  /** إشعار المزوّد بأن الرسالة بلغت الهاتف أو قُرئت أو أخفقت بعد قبولها. */
+  async providerStatus(providerRef: string, status: 'DELIVERED' | 'READ' | 'FAILED', error?: string): Promise<boolean> {
+    // الحال لا ترجع إلى الوراء: المقروءة لا تصير «بلغت»، والتي بلغت لا تصير مخفقة.
+    const from = status === 'READ' ? ['SENT', 'DELIVERED'] : ['SENT'];
+    const { rowCount } = await this.db.query(
+      'update messages set status = $2, error = $3 where provider_ref = $1 and status::text = any($4)', [providerRef, status, status === 'FAILED' ? (error ?? 'أخفق عند المزوّد') : null, from]);
+    return !!rowCount;
   }
 
   async compose(input: ComposeInput, actor: AuthUser) {
@@ -175,12 +218,13 @@ export class NotificationsService {
       `select n.id, n.kind, n.title, n.status, n.recipients, n.created_at, u.username as created_by,
               count(m.id) filter (where m.status in ('SENT', 'DELIVERED', 'READ'))::int as sent,
               count(m.id) filter (where m.status = 'FAILED')::int as failed,
+              count(m.id) filter (where m.status = 'QUEUED')::int as queued,
               count(m.id) filter (where m.status = 'NO_PHONE')::int as no_phone
        from notifications n left join users u on u.id = n.created_by left join messages m on m.notification_id = n.id
        where n.kind <> 'DELIVERY_CONFIRMATION'
        group by n.id, u.username order by n.created_at desc limit 100`,
     );
-    return rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title, status: r.status, recipients: r.recipients, createdAt: r.created_at, createdBy: r.created_by, sent: r.sent, failed: r.failed, noPhone: r.no_phone }));
+    return rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title, status: r.status, recipients: r.recipients, createdAt: r.created_at, createdBy: r.created_by, sent: r.sent, failed: r.failed, queued: r.queued, noPhone: r.no_phone }));
   }
 
   async detail(id: string) {

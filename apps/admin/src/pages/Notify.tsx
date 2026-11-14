@@ -11,7 +11,7 @@ import type { Point } from './Campaigns';
 import { CLASS_AR } from './Scoring';
 
 interface Preview { recipients: number; byChannel: Record<string, number>; needsApproval: boolean; threshold: number; sample: string | null; smsParts: number; driver: { name: string; live: boolean } }
-interface Row { id: string; kind: string; title: string; status: 'PENDING_APPROVAL' | 'SENT' | 'REJECTED'; recipients: number; createdAt: string; createdBy: string | null; sent: number; failed: number; noPhone: number }
+interface Row { id: string; kind: string; title: string; status: 'PENDING_APPROVAL' | 'SENT' | 'REJECTED'; recipients: number; createdAt: string; createdBy: string | null; sent: number; failed: number; queued: number; noPhone: number }
 interface Detail { id: string; title: string; body: string; status: string; recipients: number; byStatus: Record<string, number>; byChannel: Record<string, number>; problems: { familyId: string; familyNo: string; headName: string; status: string; error: string | null }[] }
 
 const CHANNEL_AR: Record<string, string> = { WHATSAPP: 'واتساب', SMS: 'رسالة نصية', VOICE: 'مكالمة', NO_PHONE: 'بلا هاتف' };
@@ -138,7 +138,7 @@ export function Notify() {
             {history.data?.map((n) => (
               <div key={n.id} className="flex flex-col gap-1 border-b border-line pb-2.5 last:border-0">
                 <div className="flex items-center justify-between gap-3"><button type="button" onClick={() => setOpen(n.id)} className="min-h-9 text-start font-semibold text-brand-strong underline">{n.title}</button><Badge tone={STATUS[n.status][1]}>{STATUS[n.status][0]}</Badge></div>
-                <span className="text-sm text-muted">{formatNumber(n.recipients)} عائلة{n.status === 'SENT' ? ` · خرج ${formatNumber(n.sent)}${n.failed ? ` · أخفق ${formatNumber(n.failed)}` : ''}${n.noPhone ? ` · بلا هاتف ${formatNumber(n.noPhone)}` : ''}` : ''} · {n.createdBy ?? 'النظام'} · {formatDateTime(n.createdAt)}</span>
+                <span className="text-sm text-muted">{formatNumber(n.recipients)} عائلة{n.status === 'SENT' ? ` · خرج ${formatNumber(n.sent)}${n.queued ? ` · في الطابور ${formatNumber(n.queued)}` : ''}${n.failed ? ` · أخفق ${formatNumber(n.failed)}` : ''}${n.noPhone ? ` · بلا هاتف ${formatNumber(n.noPhone)}` : ''}` : ''} · {n.createdBy ?? 'النظام'} · {formatDateTime(n.createdAt)}</span>
                 {n.status === 'PENDING_APPROVAL' && canApprove && n.createdBy !== user?.username && (
                   <div className="flex gap-2"><Button variant="danger" onClick={() => setDeciding({ id: n.id, approve: false })}>رفض</Button><Button onClick={() => setDeciding({ id: n.id, approve: true })}>اعتماد الإرسال</Button></div>
                 )}

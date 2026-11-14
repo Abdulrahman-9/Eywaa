@@ -26,6 +26,8 @@ export async function sql(text: string, params: unknown[] = []) {
 
 export async function startApp(): Promise<INestApplication> {
   process.env.DATABASE_URL = TEST_DB;
+  // الاختبارات تحرّك الطابور بيدها، فلا يسابقها العامل.
+  process.env.MSG_WORKER = 'off';
   process.env.JWT_SECRET = randomBytes(32).toString('hex');
   process.env.FIELD_ENC_KEY = randomBytes(32).toString('base64');
   process.env.FIELD_HMAC_KEY = randomBytes(32).toString('base64');
