@@ -3,6 +3,7 @@ export const FAMILY_STATUS = {
   PENDING_APPROVAL: { label: 'بانتظار الاعتماد', tone: 'warn' },
   PENDING_DEDUPE_REVIEW: { label: 'شبهة تكرار', tone: 'info' },
   REJECTED: { label: 'مرفوض', tone: 'danger' },
+  REMOVED: { label: 'مشطوبة', tone: 'neutral' },
 } as const;
 export type FamilyStatus = keyof typeof FAMILY_STATUS;
 

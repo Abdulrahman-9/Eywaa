@@ -3,6 +3,7 @@ import { app, getState, pendingCount, useApp } from './lib/store';
 import { FirstRun, Relogin, Unlock } from './screens/Auth';
 import { BoxesScreen, Custody, Donate, Requests } from './screens/Agent';
 import { GrantScreen } from './screens/Grant';
+import { Inspect } from './screens/Inspect';
 import { Deliver } from './screens/Deliver';
 import { Home, type Route } from './screens/Home';
 import { Day, Outbox } from './screens/Lists';
@@ -48,6 +49,7 @@ export function App() {
     case 'register': return <Register onBack={home} onSaved={() => setRoute('outbox')} />;
     case 'grant': return <GrantScreen onBack={home} />;
     case 'visits': return <Visits onBack={home} />;
+    case 'inspect': return <Inspect onBack={home} />;
     case 'custody': return <Custody onBack={home} />;
     case 'boxes': return <BoxesScreen onBack={home} />;
     case 'donate': return <Donate onBack={home} />;

@@ -162,6 +162,7 @@ export function Review() {
                   <li key={f.id} className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 last:border-0">
                     <span className="font-semibold tabular-nums">{f.familyNo}</span>
                     <span className="min-w-0 flex-1 font-semibold">{f.headName}</span>
+                    {f.inspection.state === 'DONE' ? <Badge tone="ok">مكشوفة</Badge> : f.inspection.state === 'OPEN' ? <Badge tone="info">قيد الكشف</Badge> : <Badge>غير مكشوفة</Badge>}
                     <span className="text-sm text-muted">{f.members} أفراد · {formatDateTime(f.createdAt)}</span>
                     <Link to={`/families/${f.id}`} className="inline-flex min-h-9 items-center rounded-lg border border-line-strong px-3.5 font-semibold hover:bg-ground">مراجعة</Link>
                   </li>

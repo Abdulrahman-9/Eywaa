@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Attachments } from '../components/Attachments';
 import { ChangeDialog } from '../components/ChangeDialog';
 import { FamilyMessages, MESSAGE_READERS } from '../components/FamilyMessages';
+import { FamilyInspections, INSPECTION_READERS, deltaText } from '../components/Inspections';
 import { FamilyReassessments } from '../components/Reassessments';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
@@ -28,9 +29,9 @@ export function Family() {
   const { user } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const [dialog, setDialog] = useState<'approve' | 'reject' | 'change' | null>(null);
+  const [dialog, setDialog] = useState<'approve' | 'reject' | 'change' | 'restore' | null>(null);
   const family = useQuery({ queryKey: ['family', id], queryFn: () => api<FamilyT>(`/families/${id}`) });
-  const score = useQuery({ queryKey: ['family', id, 'score'], queryFn: () => api<{ version: number; points: number; class: string; breakdown: ScoreLine[] } | null>(`/families/${id}/score`) });
+  const score = useQuery({ queryKey: ['family', id, 'score'], queryFn: () => api<{ version: number; points: number; class: string; breakdown: ScoreLine[]; base: number; adjustment: number } | null>(`/families/${id}/score`) });
   const entitlements = useQuery({
     queryKey: ['family', id, 'entitlements'],
     queryFn: () => api<{ programId: string; name: string; unit: string; eligible: boolean; quantity: number; reasons: string[] }[]>(`/families/${id}/entitlements`),
@@ -50,6 +51,11 @@ export function Family() {
     },
   });
 
+  const restore = useMutation({
+    mutationFn: (note: string) => api(`/families/${id}/restore`, { method: 'POST', body: { note } }),
+    onSuccess: () => { toast('أُعيدت العائلة إلى المستفيدين وحُسبت نقاطها'); setDialog(null); for (const key of ['family', 'families', 'overview', 'inspections']) queryClient.invalidateQueries({ queryKey: [key] }); },
+  });
+
   if (family.isPending) return <Skeleton className="h-40 w-full" />;
   if (family.error) return <Alert>{family.error.message}</Alert>;
   const f = family.data;
@@ -57,7 +63,7 @@ export function Family() {
   const mine = f.createdBy === user?.username;
   const pending = f.status === 'PENDING_APPROVAL' || f.status === 'PENDING_DEDUPE_REVIEW';
   const canDecide = !!user && DECIDERS.includes(user.role) && pending;
-  const canEdit = !!user && EDITORS.includes(user.role) && f.status !== 'REJECTED';
+  const canEdit = !!user && EDITORS.includes(user.role) && f.status !== 'REJECTED' && f.status !== 'REMOVED';
   const openFlags = f.duplicateFlags.filter((x) => x.status === 'OPEN');
   const pendingChanges = (changes.data ?? []).filter((c) => c.status === 'PENDING');
 
@@ -86,6 +92,7 @@ export function Family() {
             <span className="font-semibold tabular-nums">العائلة {f.familyNo}</span>
             <Badge tone={FAMILY_STATUS[f.status].tone}>{FAMILY_STATUS[f.status].label}</Badge>
             {f.score && <span className="rounded-md bg-brand-strong px-2.5 py-0.5 text-sm font-bold text-white">الفئة {CLASS_AR[f.score.class]} · {f.score.points} نقطة</span>}
+            {f.status !== 'REJECTED' && f.status !== 'REMOVED' && (f.inspectedAt ? <Badge tone="ok">مكشوفة</Badge> : <Badge>غير مكشوفة</Badge>)}
             {f.tags.map((t) => <Badge key={t}>{TAGS[t]}</Badge>)}
           </div>
         </div>
@@ -110,6 +117,12 @@ export function Family() {
         <Alert tone="warn"><strong>{pendingChanges.length === 1 ? 'طلب تعديل ينتظر' : `${pendingChanges.length} طلبات تعديل تنتظر`} الاعتماد.</strong> لا تسري حتى تُعتمد. <Link to="/review?tab=changes" className="font-bold underline">راجعها</Link></Alert>
       )}
       {f.status === 'REJECTED' && <Alert><strong>سجل مرفوض.</strong> {f.decisionNote} (بقرار {f.decidedBy})</Alert>}
+      {f.removal && (
+        <Alert>
+          <strong>عائلة مشطوبة من المستفيدين.</strong> {f.removal.note} (بقرار {f.removal.by} · {formatDateTime(f.removal.at)}). سجلها باقٍ ووثائقها محجوزة، ولا تدخل حملة.
+          {user && DECIDERS.includes(user.role) && f.removal.by !== user.username && <> <button type="button" className="font-bold underline" onClick={() => { restore.reset(); setDialog('restore'); }}>أعدها إلى المستفيدين</button></>}
+        </Alert>
+      )}
       {f.membersWithoutDocument.length > 0 && <Alert tone="warn"><strong>أفراد بلا وثيقة:</strong> {f.membersWithoutDocument.join('، ')}. تُستكمل بطلب «إضافة وثيقة».</Alert>}
 
       <div className="flex flex-wrap items-start gap-5">
@@ -179,6 +192,12 @@ export function Family() {
                   <li key={l.key} className="flex justify-between gap-3"><span>{l.label} <span className="text-muted">({l.why})</span></span><strong className="flex-none tabular-nums">{l.got} / {l.max}</strong></li>
                 ))}
               </ul>
+              {score.data.adjustment !== 0 && (
+                <ul className="flex flex-col gap-1.5 border-t border-line pt-2 text-sm" data-testid="score-adjustment">
+                  <li className="flex justify-between gap-3"><span>مجموع المعادلة</span><strong className="tabular-nums">{score.data.base}</strong></li>
+                  <li className="flex justify-between gap-3"><span>تعديل الكشف الميداني <span className="text-muted">(بقرار معتمَد)</span></span><strong className={`tabular-nums ${score.data.adjustment > 0 ? 'text-info-ink' : 'text-warn-ink'}`}>{deltaText(score.data.adjustment)}</strong></li>
+                </ul>
+              )}
               <p className="border-t border-line pt-2 text-sm text-muted">الفئة {CLASS_AR[score.data.class]}، بالإصدار {score.data.version} من المعادلة.</p>
             </Card>
           )}
@@ -221,6 +240,7 @@ export function Family() {
         </div>
       </div>
 
+      {user && INSPECTION_READERS.includes(user.role) && <FamilyInspections familyId={f.id} familyNo={f.familyNo} headName={head?.fullName ?? null} status={f.status} inspectedAt={f.inspectedAt} delta={f.inspectionDelta} />}
       {user && MESSAGE_READERS.includes(user.role) && f.status === 'APPROVED' && <FamilyMessages familyId={f.id} familyNo={f.familyNo} hasPhone={!!f.phone1} />}
       {user && ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'AUDITOR'].includes(user.role) && f.status === 'APPROVED' && <FamilyReassessments familyId={f.id} familyNo={f.familyNo} approved />}
       <ReasonDialog open={dialog === 'approve'} title={`اعتماد العائلة ${f.familyNo}`} confirmLabel="اعتماد" required={false}
@@ -232,6 +252,10 @@ export function Family() {
         pending={decide.isPending} error={decide.error?.message} onClose={() => { decide.reset(); setDialog(null); }}
         onConfirm={(note) => decide.mutate({ verb: 'reject', note })}>
         <p>يبقى السجل للتاريخ، وتتحرر وثائقه لتسجيل لاحق صحيح.</p>
+      </ReasonDialog>
+      <ReasonDialog open={dialog === 'restore'} title={`إعادة العائلة ${f.familyNo} إلى المستفيدين`} confirmLabel="أعد العائلة"
+        pending={restore.isPending} error={restore.error?.message} onClose={() => setDialog(null)} onConfirm={(note) => restore.mutate(note)}>
+        <p>تعود معتمدة وتُحسب نقاطها من جديد. ما سقط من استحقاقها في الحملات لا يعود من نفسه. لا يعيدها من شطبها.</p>
       </ReasonDialog>
       <ChangeDialog family={f} open={dialog === 'change'} onClose={() => setDialog(null)} />
       </div>

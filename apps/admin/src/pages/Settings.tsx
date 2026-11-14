@@ -19,6 +19,13 @@ export function Settings() {
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<Setting[]>('/settings') });
   const poverty = settings.data?.find((s) => s.key === 'poverty_line_iqd');
   const [draft, setDraft] = useState('');
+  const cap = settings.data?.find((s) => s.key === 'inspection_max_delta');
+  const [capDraft, setCapDraft] = useState('');
+  const saveCap = useMutation({
+    mutationFn: (value: number) => api('/settings/inspection_max_delta', { method: 'PUT', body: { value } }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['settings'] }); queryClient.invalidateQueries({ queryKey: ['inspections'] }); setCapDraft(''); },
+  });
+  const nextCap = capDraft === '' ? NaN : Number(capDraft);
   const [confirming, setConfirming] = useState(false);
   const save = useMutation({
     mutationFn: (value: number) => api('/settings/poverty_line_iqd', { method: 'PUT', body: { value } }),
@@ -64,6 +71,32 @@ export function Settings() {
               </Field>
             </div>
             <Button type="submit" disabled={!valid}>تغيير</Button>
+          </form>
+        ) : (
+          <p className="border-t border-line pt-4 text-sm text-muted">تغيير هذه القيمة من صلاحية مدير النظام وحده.</p>
+        )}
+      </Card>
+
+      <Card className="flex max-w-2xl flex-col gap-4">
+        <div>
+          <h2 className="text-lg font-bold">حدّ تعديل الكشف الميداني</h2>
+          <p className="text-muted">أقصى ما يرفعه الكشف أو يخفضه من نقاط العائلة، مجتمعاً. يُضاف إلى مجموع المعادلة بقرار معتمَد. ما اعتُمد قبل تغيير الحدّ يبقى كما اعتُمد.</p>
+        </div>
+        {!cap ? <Skeleton className="h-10 w-48" /> : (
+          <>
+            <p className="text-4xl font-bold tabular-nums" data-testid="inspection-cap">±{cap.value} <span className="text-lg font-medium text-muted">نقاط</span></p>
+            <p className="text-sm text-muted">{cap.updatedBy ? `آخر تغيير: ${formatDateTime(cap.updatedAt)} بيد ${cap.updatedBy}` : 'القيمة الابتدائية: نصف عرض الفئة بالحدود الأولى.'}</p>
+          </>
+        )}
+        {saveCap.error && <Alert>{saveCap.error.message}</Alert>}
+        {isAdmin ? (
+          <form onSubmit={(e) => { e.preventDefault(); if (Number.isInteger(nextCap)) saveCap.mutate(nextCap); }} className="flex flex-wrap items-end gap-3 border-t border-line pt-4">
+            <div className="min-w-48 flex-1">
+              <Field label="الحدّ الجديد بالنقاط" hint="من 0 (يُعطَّل الرفع والخفض) إلى 50">
+                {(id) => <Input id={id} dir="ltr" inputMode="numeric" placeholder="10" value={capDraft} onChange={(e) => setCapDraft(e.target.value.replace(/\D/g, ''))} />}
+              </Field>
+            </div>
+            <Button type="submit" disabled={!Number.isInteger(nextCap) || nextCap > 50 || nextCap === cap?.value || saveCap.isPending}>غيّر الحدّ</Button>
           </form>
         ) : (
           <p className="border-t border-line pt-4 text-sm text-muted">تغيير هذه القيمة من صلاحية مدير النظام وحده.</p>

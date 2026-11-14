@@ -64,15 +64,34 @@ export interface RequestOp {
 }
 /** شهادة المتعهد باستلام ما حُوّل إلى مخزنه، أو بفرق فيه. */
 export interface AckOp { moveId: string; ok: boolean; note?: string; item: string; quantity: number; unit: string; sync: OpSync; error?: string }
+/** كشف ميداني كُلّف به هذا الموظف، ومعه صورة العائلة كما في سجلها ليطابقها بما يرى. */
+export interface InspectionTask {
+  id: string; no: number; note: string | null; requestedAt: string; partner: string | null; late: boolean;
+  family: {
+    familyNo: string; headName: string | null; phone: string | null; mahalla: string | null; address: string; location: { lat: number; lng: number } | null;
+    members: { name: string; relation: string; gender: string; age: number | null; isOrphan: boolean; disability: string | null; chronicIllness: string | null }[];
+    facts: { key: string; label: string; recorded: string }[];
+  };
+}
+export type Recommendation = 'CONFIRM' | 'RAISE' | 'LOWER' | 'REMOVE' | 'UNABLE';
+/** ما آل إليه كشف رفعه: هل اعتُمد، وما أثره. */
+export interface InspectionResult { id: string; no: number; familyNo: string; headName: string | null; recommendation: Recommendation; submittedAt: string; status: string; effect: string | null; points: number | null; decisionNote: string | null }
+export interface InspectionOp {
+  clientOpId: string; inspectionId: string; no: number; familyNo: string; headName: string | null; visitedAt: string;
+  contact: 'FAMILY' | 'OTHERS' | 'NONE'; checks: { key: string; result: 'MATCH' | 'MISMATCH' | 'UNCHECKED'; found?: string }[]; notes?: string; recommendation: Recommendation; reason?: string;
+  sync: OpSync; error?: string;
+}
 interface Data {
   token: string | null; user: User | null; station: Station | null; deliveries: Delivery[]; registrations: Registration[]; visits: Visit[]; visitReports: VisitReport[];
   assignments: Assignment[]; grants: Grant[]; cases: GrantCase[];
   agentInfo: AgentInfo | null; collections: CollectionOp[]; donations: DonationOp[]; requests: RequestOp[]; acks: AckOp[];
+  inspections: InspectionTask[]; inspectionResults: InspectionResult[]; inspectionOps: InspectionOp[];
 }
 
 export interface AppState extends Data { meta: Meta | null; unlocked: boolean; manifest: Manifest | null; online: boolean; syncing: boolean; lastSync: string | null; needLogin: boolean; revoked: boolean }
 
-const EMPTY: Data = { token: null, user: null, station: null, deliveries: [], registrations: [], visits: [], visitReports: [], assignments: [], grants: [], cases: [], agentInfo: null, collections: [], donations: [], requests: [], acks: [] };
+const EMPTY: Data = { token: null, user: null, station: null, deliveries: [], registrations: [], visits: [], visitReports: [], assignments: [], grants: [], cases: [], agentInfo: null, collections: [], donations: [], requests: [], acks: [], inspections: [], inspectionResults: [], inspectionOps: [] };
+const INSPECTORS = ['DISTRIBUTION_AGENT', 'FIELD_RESEARCHER'];
 /** خطأ يردّ به الخادم العملية نفسها (لا انقطاع ولا جلسة منتهية ولا عطل): تُعلَّم مردودة ولا تُعاد. */
 const rejected = (err: unknown): err is ApiError => err instanceof ApiError && !err.offline && err.status !== 401 && err.status < 500;
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
@@ -84,7 +103,8 @@ export const useApp = () => useSyncExternalStore((l) => { listeners.add(l); retu
 
 /** يكتب البيانات إلى الخزنة. لا يُعدّ شيء محفوظاً حتى يعود هذا الوعد. */
 async function save(patch: Partial<Data>) {
-  const next: Data = { token: state.token, user: state.user, station: state.station, deliveries: state.deliveries, registrations: state.registrations, visits: state.visits, visitReports: state.visitReports, assignments: state.assignments, grants: state.grants, cases: state.cases, agentInfo: state.agentInfo, collections: state.collections, donations: state.donations, requests: state.requests, acks: state.acks, ...patch };
+  const next: Data = { token: state.token, user: state.user, station: state.station, deliveries: state.deliveries, registrations: state.registrations, visits: state.visits, visitReports: state.visitReports, assignments: state.assignments, grants: state.grants, cases: state.cases, agentInfo: state.agentInfo, collections: state.collections, donations: state.donations, requests: state.requests, acks: state.acks,
+    inspections: state.inspections, inspectionResults: state.inspectionResults, inspectionOps: state.inspectionOps, ...patch };
   await vault.put('data', next);
   set(next);
 }
@@ -186,9 +206,11 @@ export const app = {
   async addDonation(d: DonationOp) { await save({ donations: [...state.donations, d] }); },
   async addRequest(r: RequestOp) { await save({ requests: [...state.requests, r] }); },
   async addAck(a: AckOp) { await save({ acks: [...state.acks.filter((x) => x.moveId !== a.moveId), a] }); },
+  async addInspection(op: InspectionOp) { await save({ inspectionOps: [...state.inspectionOps.filter((x) => x.inspectionId !== op.inspectionId), op] }); },
   /** يزيل عملية ردّها الخادم بعد أن رآها صاحبها. */
-  async dropOp(list: 'collections' | 'donations' | 'requests', clientOpId: string) {
-    if (list === 'collections') await save({ collections: state.collections.filter((x) => x.clientOpId !== clientOpId) });
+  async dropOp(list: 'collections' | 'donations' | 'requests' | 'inspectionOps', clientOpId: string) {
+    if (list === 'inspectionOps') await save({ inspectionOps: state.inspectionOps.filter((x) => x.clientOpId !== clientOpId) });
+    else if (list === 'collections') await save({ collections: state.collections.filter((x) => x.clientOpId !== clientOpId) });
     else if (list === 'donations') await save({ donations: state.donations.filter((x) => x.clientOpId !== clientOpId) });
     else await save({ requests: state.requests.filter((x) => x.clientOpId !== clientOpId) });
   },
@@ -337,6 +359,22 @@ export const app = {
         }
         await save({ acks: state.acks.map((a) => (a.moveId === x.moveId ? { ...a, ...patch } : a)) });
       }
+      for (const x of state.inspectionOps.filter((o) => o.sync === 'PENDING')) {
+        let patch: Partial<InspectionOp>;
+        try {
+          await api(`/inspections/${x.inspectionId}/report`, { token, timeoutMs: 30_000, body: { contact: x.contact, checks: x.checks, notes: x.notes, recommendation: x.recommendation, reason: x.reason, visitedAt: x.visitedAt, clientOpId: x.clientOpId } });
+          patch = { sync: 'SYNCED', error: undefined };
+        } catch (err) {
+          if (!rejected(err)) throw err;
+          patch = { sync: 'REJECTED', error: err.message };
+        }
+        await save({ inspectionOps: state.inspectionOps.map((o) => (o.clientOpId === x.clientOpId ? { ...o, ...patch } : o)) });
+      }
+      if (state.user && INSPECTORS.includes(state.user.role)) {
+        const mine = await api<{ pending: InspectionTask[]; recent: InspectionResult[] }>('/inspections/mine', { token, timeoutMs: 30_000 });
+        // ما رُفع صار في جواب الخادم؛ وصورة العائلة تُمحى من الجهاز حين يخرج كشفها من المطلوب.
+        await save({ inspections: mine.pending, inspectionResults: mine.recent, inspectionOps: state.inspectionOps.filter((o) => o.sync !== 'SYNCED') });
+      }
       if (state.user?.role === 'DISTRIBUTION_AGENT') {
         const [assignments, grants, agentInfo] = await Promise.all([
           api<Assignment[]>('/agent/assignments', { token, timeoutMs: 30_000 }),
@@ -378,10 +416,13 @@ export const app = {
 export const pendingCount = (s: AppState) =>
   s.deliveries.filter((d) => d.sync === 'PENDING' || (d.photo === 'PENDING')).length + s.registrations.filter((r) => r.sync === 'PENDING' || (r.sync === 'SYNCED' && r.photos.length > 0)).length
   + s.visitReports.filter((r) => r.sync === 'PENDING').length + s.cases.filter((c) => c.sync === 'PENDING').length
-  + [...s.collections, ...s.donations, ...s.requests, ...s.acks].filter((x) => x.sync === 'PENDING').length;
+  + [...s.collections, ...s.donations, ...s.requests, ...s.acks, ...s.inspectionOps].filter((x) => x.sync === 'PENDING').length;
 
 /** عدد ما ردّه الخادم من عمليات المتعهد. */
-export const rejectedOps = (s: AppState) => [...s.collections, ...s.donations, ...s.requests].filter((x) => x.sync === 'REJECTED').length;
+export const rejectedOps = (s: AppState) => [...s.collections, ...s.donations, ...s.requests, ...s.inspectionOps].filter((x) => x.sync === 'REJECTED').length;
+
+/** ما كُلّف به ولم يسجّل كشفه على هذا الهاتف بعد. */
+export const inspectionsTodo = (s: AppState) => s.inspections.filter((t) => !s.inspectionOps.some((o) => o.inspectionId === t.id));
 
 /** ذمة المتعهد النقدية كما يراها هاتفه: ما في دفتر الخادم عند آخر مزامنة، مع ما سجّله ولم يُرفع بعد. */
 export function custodyOf(s: AppState) {

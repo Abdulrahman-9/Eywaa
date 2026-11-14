@@ -30,6 +30,8 @@ create table inspections (
   points_after  integer,
   class_before  char(1),
   class_after   char(1),
+  -- اعتُمد تسجيل العائلة مع اعتماد كشفها، في القرار نفسه.
+  family_approved boolean not null default false,
   constraint decided_complete check ((status in ('APPROVED', 'REJECTED')) = (decided_by is not null and decided_at is not null)),
   constraint approved_has_effect check ((status = 'APPROVED') = (effect is not null)),
   constraint move_has_points check ((effect in ('RAISED', 'LOWERED')) = (points is not null)),

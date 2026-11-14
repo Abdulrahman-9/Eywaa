@@ -91,7 +91,7 @@ export function Dialog({ open, title, onClose, children, wide }: { open: boolean
         <RadixDialog.Overlay className="dialog-overlay fixed inset-0 z-40 bg-ink/45 backdrop-blur-[2px]" />
         <RadixDialog.Content
           aria-describedby={undefined}
-          className={cn('dialog-content fixed start-1/2 top-1/2 z-40 flex max-h-[calc(100dvh-2rem)] w-[min(32rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto rounded-2xl border border-line bg-surface p-6 text-ink shadow-[0_24px_60px_-12px_rgba(16,35,30,0.35)] focus:outline-none', wide && 'w-[min(44rem,calc(100vw-2rem))]')}
+          className={cn('dialog-content fixed start-1/2 top-1/2 z-40 flex max-h-[calc(100dvh-2rem)] w-[min(32rem,calc(100vw-2rem))] flex-col gap-4 overflow-y-auto rounded-2xl [&>*]:shrink-0 border border-line bg-surface p-6 text-ink shadow-[0_24px_60px_-12px_rgba(16,35,30,0.35)] focus:outline-none', wide && 'w-[min(44rem,calc(100vw-2rem))]')}
         >
           <div className="flex items-start gap-3">
             <RadixDialog.Title className="min-w-0 flex-1 text-xl font-bold">{title}</RadixDialog.Title>

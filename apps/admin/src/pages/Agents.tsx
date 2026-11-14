@@ -13,8 +13,8 @@ import { formatAgo, formatNumber } from '../lib/format';
 export interface AgentRow {
   id: string; fullName: string; username: string; phone: string | null; active: boolean; since: string; pointId: string | null;
   custody: number; custodyDays: number | null; lastHandover: string | null; goods: number; goodsItems: number; boxes: number; staleBoxes: number;
-  pendingDeliveries: number; openReports: number; unacked: number; disputes: number;
-  last30: { deliveries: number; collections: number; collected: number; cashDonations: number; cashDonated: number; inKindDonations: number; additions: number; edits: number };
+  pendingDeliveries: number; pendingInspections: number; openReports: number; unacked: number; disputes: number;
+  last30: { inspections: number; deliveries: number; collections: number; collected: number; cashDonations: number; cashDonated: number; inKindDonations: number; additions: number; edits: number };
   lastActivity: string | null; alerts: string[];
 }
 interface Overview {

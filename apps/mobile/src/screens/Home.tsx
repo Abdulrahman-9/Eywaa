@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { app, custodyOf, pendingCount, rejectedOps, useApp } from '../lib/store';
+import { app, custodyOf, inspectionsTodo, pendingCount, rejectedOps, useApp } from '../lib/store';
 import { Button, Notice, Screen, formatNumber, formatTime } from '../ui';
 
-export type Route = 'home' | 'station' | 'deliver' | 'day' | 'register' | 'outbox' | 'relogin' | 'visits' | 'grant' | 'custody' | 'boxes' | 'donate' | 'requests';
+export type Route = 'home' | 'station' | 'deliver' | 'day' | 'register' | 'outbox' | 'relogin' | 'visits' | 'grant' | 'custody' | 'boxes' | 'donate' | 'requests' | 'inspect';
 const DESK = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR', 'DISTRIBUTION_AGENT'];
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
+const INSPECTORS = ['DISTRIBUTION_AGENT', 'FIELD_RESEARCHER'];
 
 export function OnlineChip() {
   const { online } = useApp();
@@ -24,6 +25,7 @@ export function Home({ go }: { go: (r: Route) => void }) {
   const unacked = (s.agentInfo?.goods.transfers.filter((t) => t.needsAck && !s.acks.some((a) => a.moveId === t.id)).length ?? 0);
   const staleBoxes = s.agentInfo?.boxes.filter((b) => b.stale && !s.collections.some((c) => c.boxId === b.id && c.sync === 'PENDING')).length ?? 0;
   const role = s.user?.role ?? '';
+  const toInspect = inspectionsTodo(s);
   const agent = role === 'DISTRIBUTION_AGENT';
   const [picking, setPicking] = useState(false);
   const grants = s.grants.filter((g) => new Date(g.expiresAt).getTime() > Date.now());
@@ -51,7 +53,7 @@ export function Home({ go }: { go: (r: Route) => void }) {
           <span className="font-semibold">ينتظر الرفع إلى الخادم</span>
           <strong data-testid="pending" className={`text-3xl tabular-nums ${pending ? 'text-warn-ink' : 'text-brand-strong'}`}>{pending}</strong>
         </div>
-        {conflicts > 0 && <button type="button" onClick={() => go(s.cases.some((c) => c.sync === 'REJECTED') ? 'grant' : s.collections.some((c) => c.sync === 'REJECTED') ? 'boxes' : s.donations.some((d) => d.sync === 'REJECTED') ? 'donate' : s.requests.some((r) => r.sync === 'REJECTED') ? 'requests' : 'outbox')} className="text-start font-semibold text-danger underline">{conflicts} عملية تحتاج نظرك</button>}
+        {conflicts > 0 && <button type="button" onClick={() => go(s.cases.some((c) => c.sync === 'REJECTED') ? 'grant' : s.collections.some((c) => c.sync === 'REJECTED') ? 'boxes' : s.donations.some((d) => d.sync === 'REJECTED') ? 'donate' : s.requests.some((r) => r.sync === 'REJECTED') ? 'requests' : s.inspectionOps.some((o) => o.sync === 'REJECTED') ? 'inspect' : 'outbox')} className="text-start font-semibold text-danger underline">{conflicts} عملية تحتاج نظرك</button>}
         <Button variant={pending ? 'primary' : 'secondary'} disabled={s.syncing} onClick={() => void sync()}>{s.syncing ? 'جارٍ الرفع…' : 'زامن الآن'}</Button>
       </section>
 
@@ -112,6 +114,15 @@ export function Home({ go }: { go: (r: Route) => void }) {
             <Button variant="secondary" onClick={() => go('donate')}>تبرع جديد</Button>
             <Button variant="secondary" onClick={() => go('requests')}>طلباتي</Button>
           </div>
+        </section>
+      )}
+
+      {INSPECTORS.includes(role) && (
+        <section aria-label="الكشف الميداني" className={`flex flex-col gap-3 rounded-2xl border bg-surface p-4 ${toInspect.some((t) => t.late) ? 'border-2 border-[#C8862A]' : 'border-line'}`}>
+          <h2 className="text-lg font-bold">الكشف الميداني</h2>
+          <p className="text-muted">{toInspect.length ? 'عوائل كُلّفتَ بزيارتها: تطابق ما سُجّل بما ترى وترفع ما وجدتَ.' : 'لا كشف مطلوب منك الآن. القائمة تتجدد عند كل مزامنة.'}</p>
+          {toInspect.some((t) => t.late) && <Notice tone="warn">{toInspect.filter((t) => t.late).length} منها تأخّر أكثر من أسبوع.</Notice>}
+          <Button variant={toInspect.length ? 'primary' : 'secondary'} onClick={() => go('inspect')}>الكشوف المطلوبة ({toInspect.length})</Button>
         </section>
       )}
 

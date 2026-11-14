@@ -494,7 +494,8 @@ export class FamiliesService implements OnModuleInit {
          and ($8::text is null
               or ($8 = 'OPEN' and exists (select 1 from inspections i where i.family_id = f.id and i.status in ('ASSIGNED', 'SUBMITTED')))
               or ($8 = 'DONE' and f.inspected_at is not null)
-              or ($8 = 'NONE' and f.inspected_at is null and not exists (select 1 from inspections i where i.family_id = f.id and i.status in ('ASSIGNED', 'SUBMITTED'))))
+              or ($8 = 'NONE' and f.inspected_at is null and f.status not in ('REJECTED', 'REMOVED')
+                  and not exists (select 1 from inspections i where i.family_id = f.id and i.status in ('ASSIGNED', 'SUBMITTED'))))
        order by f.created_at desc limit $4 offset $5`,
       [params.status ?? null, isNumeric ? digits : null, nameNorm, params.limit, params.offset, params.class ?? null,
        // رقم الوثيقة وحده، بأي نوع كانت: البطاقة الوطنية، أو هوية الأحوال بلا سجلها.
@@ -572,6 +573,16 @@ export class FamiliesService implements OnModuleInit {
       actorId: actor.id, action: decision === 'APPROVED' ? 'family.approve' : 'family.reject',
       entity: 'family', entityId: id, payload: { note: note ?? null },
     });
+  }
+
+  /** اعتماد تسجيل عائلة داخل معاملة قائمة (يستعمله اعتماد كشفها الميداني). شروطه شروط الاعتماد نفسها. */
+  async approveIn(c: PoolClient, id: string, note: string | undefined, actor: AuthUser) {
+    const f = (await c.query('select status, created_by from families where id = $1 for update', [id])).rows[0];
+    if (!f) throw new NotFoundException('العائلة غير موجودة');
+    if (f.created_by === actor.id) throw new ForbiddenException('لا يعتمد الموظف ما أدخله بنفسه');
+    if (f.status === 'PENDING_DEDUPE_REVIEW') throw new ConflictException('في السجل شبهات تكرار لم يُفصل فيها');
+    if (f.status !== 'PENDING_APPROVAL') throw new ConflictException('السجل ليس بانتظار قرار');
+    await this.applyDecision(c, id, 'APPROVED', note, actor);
   }
 
   // ---------- الشطب والإعادة ----------

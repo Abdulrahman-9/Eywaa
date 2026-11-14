@@ -205,7 +205,7 @@ describe('قرار المدير وأثره', () => {
     await post(`/inspections/${third}/report`, 'agent', confirm({ recommendation: 'RAISE', reason: 'ما زالت على حالها' }));
     const full = await post(`/inspections/${third}/decide`, 'supervisor', { decision: 'APPROVE', effect: 'RAISE', points: 1 });
     expect(full.status).toBe(409);
-    expect(full.body.message).toContain('بلغ تعديل الكشف على هذه العائلة حدّه (+10)');
+    expect(full.body.message).toContain('بلغ تعديل الكشف على هذه العائلة حدّه (رفع 10)');
     // يُعتمد بلا أثر: الكاشف أوصى بالرفع، فالمخالفة تلزمها علّة.
     expect((await post(`/inspections/${third}/decide`, 'supervisor', { decision: 'APPROVE', effect: 'NONE' })).status).toBe(400);
     expect((await post(`/inspections/${third}/decide`, 'supervisor', { decision: 'APPROVE', effect: 'NONE', note: 'بلغت الحدّ' })).body.effect).toBe('NONE');
@@ -333,5 +333,38 @@ describe('أرقام الكشف', () => {
     expect(a.alerts.some((t: string) => t.includes('كشف كُلّف به منذ أكثر من 7 أيام ولم يرفعه'))).toBe(true);
     const detail = (await get(`/agents/${ids.agent}`, 'manager')).body;
     expect(detail.timeline.some((t: any) => t.text.includes(`رفع كشف العائلة ${f4.no}: يطلب شطبها، وفيها 1 بند غير مطابق`))).toBe(true);
+  });
+});
+
+describe('اعتماد التسجيل مع اعتماد الكشف', () => {
+  it('عائلة تنتظر الاعتماد يُعتمد تسجيلها مع كشفها في قرار واحد، وتُحسب نقاطها بتعديله', async () => {
+    const pending = await post('/families', 'researcher', family());
+    const ins = (await assign([pending.body.id], ['agent2'])).body.inspections[0].id;
+    await post(`/inspections/${ins}/report`, 'agent2', confirm({ notes: 'حالها أشدّ مما يظهر في السجل' }));
+    const decide = (body: any, user = 'supervisor') => post(`/inspections/${ins}/decide`, user, { decision: 'APPROVE', ...body });
+    expect((await decide({ effect: 'REMOVE', approveFamily: true, note: 'لا تجتمعان' })).status).toBe(400);
+    const d = await decide({ effect: 'RAISE', points: 4, approveFamily: true, note: 'بيتها هيكل بلا سقف كما في ملاحظات الكاشف' });
+    expect(d.status).toBe(200);
+    expect(d.body).toMatchObject({ status: 'APPROVED', effect: 'RAISED', points: 4, deltaAfter: 4, pointsBefore: null, pointsAfter: 57, classAfter: 'B', familyApproved: true, familyStatus: 'APPROVED' });
+    const fam = (await get(`/families/${pending.body.id}`, 'supervisor')).body;
+    expect(fam).toMatchObject({ status: 'APPROVED', decidedBy: 'supervisor', inspectionDelta: 4, score: { points: 57, class: 'B' } });
+    expect(fam.decisionNote).toContain('بعد الكشف الميداني رقم');
+    expect(fam.inspectedAt).toBeTruthy();
+    expect(await score(pending.body.id)).toMatchObject({ points: 57, base: 53, adjustment: 4 });
+    // والمعتمدة لا تُعتمد ثانية: القرار كله يُردّ ولا يُحفظ منه شيء.
+    const again = (await assign([pending.body.id], ['agent2'])).body.inspections[0].id;
+    await post(`/inspections/${again}/report`, 'agent2', confirm());
+    const twice = await post(`/inspections/${again}/decide`, 'supervisor', { decision: 'APPROVE', effect: 'NONE', approveFamily: true });
+    expect(twice.status).toBe(409);
+    expect((await get(`/inspections/${again}`, 'supervisor')).body.status).toBe('SUBMITTED');
+  });
+
+  it('من سجّل العائلة لا يعتمدها بكشفها', async () => {
+    const own = await post('/families', 'supervisor', family());
+    const ins = (await assign([own.body.id], ['agent2'], {}, 'admin')).body.inspections[0].id;
+    await post(`/inspections/${ins}/report`, 'agent2', confirm());
+    expect((await post(`/inspections/${ins}/decide`, 'supervisor', { decision: 'APPROVE', effect: 'NONE', approveFamily: true })).status).toBe(403);
+    const ok = await post(`/inspections/${ins}/decide`, 'admin', { decision: 'APPROVE', effect: 'NONE', approveFamily: true });
+    expect(ok.body).toMatchObject({ effect: 'NONE', familyApproved: true, familyStatus: 'APPROVED', pointsAfter: 53 });
   });
 });

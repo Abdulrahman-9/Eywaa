@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, Banknote, Boxes, Check, Package, Pencil, Phone, Truck } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Banknote, Boxes, Check, ClipboardCheck, Package, Pencil, Phone, Truck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AgentDonations, type Donation } from '../components/AgentDonations';
@@ -97,6 +97,7 @@ export function Agent() {
           [<Banknote aria-hidden="true" className="size-5" />, 'في ذمته نقداً', formatNumber(a.custody), a.custodyDays !== null ? (a.custodyDays === 0 ? 'دخلت ذمته اليوم' : `${formatDays(a.custodyDays)} دون تسليم`) : a.lastHandover ? `آخر تسليم ${formatAgo(a.lastHandover)}` : 'لم يسلّم بعد'],
           [<Package aria-hidden="true" className="size-5" />, 'مواد في عهدته', formatNumber(a.goods), a.goodsItems ? `في ${a.goodsItems} صنف` : 'مخزنه فارغ'],
           [<Truck aria-hidden="true" className="size-5" />, 'سلّم في 30 يوماً', formatNumber(a.last30.deliveries), a.pendingDeliveries ? `بقي عليه ${formatNumber(a.pendingDeliveries)}` : 'لا حصة باقية'],
+          [<ClipboardCheck aria-hidden="true" className="size-5" />, 'كشف في 30 يوماً', formatNumber(a.last30.inspections), a.pendingInspections ? `عليه ${formatNumber(a.pendingInspections)} لم يرفعها` : 'لا كشف عليه'],
           [<Boxes aria-hidden="true" className="size-5" />, 'حصّل في 30 يوماً', formatNumber(a.last30.collected + a.last30.cashDonated), `${a.last30.collections} فتح صندوق · ${a.last30.cashDonations} تبرع`],
         ] as const).map(([icon, label, value, note]) => (
           <Card key={label} className="flex flex-col gap-0.5"><span className="flex items-center gap-2 text-sm text-muted">{icon}{label}</span><span className="text-3xl font-bold leading-tight tabular-nums">{value}</span><span className="text-sm text-muted">{note}</span></Card>

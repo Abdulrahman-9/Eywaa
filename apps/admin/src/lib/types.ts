@@ -22,8 +22,11 @@ export interface Family {
   proxies: { id: string; fullName: string; phone: string | null; relation: string | null; active: boolean }[];
   duplicateFlags: FlagView[];
   createdBy: string; createdAt: string; decidedBy: string | null; decidedAt: string | null; decisionNote: string | null;
+  inspectedAt: string | null; inspectionDelta: number; removal: { by: string; at: string; note: string } | null;
 }
-export interface FamilyRow { id: string; familyNo: string; status: FamilyStatus; tags: Tag[]; phone1: string | null; headName: string | null; members: number; createdAt: string; score: ScoreBrief | null }
+/** حال العائلة من الكشف الميداني: غير مكشوفة، قيد الكشف، أو مكشوفة. */
+export interface InspectionState { state: 'NONE' | 'OPEN' | 'DONE'; at: string | null; delta: number }
+export interface FamilyRow { id: string; familyNo: string; status: FamilyStatus; tags: Tag[]; phone1: string | null; headName: string | null; members: number; createdAt: string; score: ScoreBrief | null; inspection: InspectionState }
 export interface Attachment { id: string; personId: string | null; category: AttachmentCategory; originalName: string; mime: string; sizeBytes: number; uploadedBy: string; createdAt: string }
 export interface ChangeRequest {
   id: string; familyId: string; familyNo: string; type: ChangeType; payload: Record<string, any>; reason: string;

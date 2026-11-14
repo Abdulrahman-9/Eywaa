@@ -53,6 +53,8 @@ export const decideSchema = z.object({
   decision: z.enum(['APPROVE', 'REJECT']),
   effect: z.enum(['NONE', 'RAISE', 'LOWER', 'REMOVE']).optional(),
   points: z.number().int().min(1).max(100).optional(),
+  /** لعائلة تنتظر الاعتماد: يُعتمد تسجيلها مع اعتماد كشفها، في القرار نفسه. */
+  approveFamily: z.boolean().optional(),
   note: short(500).optional(),
 });
 export const cancelSchema = z.object({ note: z.string().trim().min(3, 'يلزم ذكر السبب').max(300) });
@@ -314,7 +316,7 @@ export class InspectionsService {
       const i = (await c.query('select * from inspections where id = $1 for update', [id])).rows[0];
       if (!i) throw new NotFoundException('الكشف غير موجود');
       if (i.status !== 'ASSIGNED' && i.status !== 'SUBMITTED') throw new ConflictException('فُصل في هذا الكشف من قبل');
-      const reports = (await c.query('select inspector_id, recommendation, reason from inspection_reports where inspection_id = $1 and submitted_at is not null', [id])).rows;
+      const reports = (await c.query('select inspector_id, recommendation, reason from inspection_reports where inspection_id = $1 and submitted_at is not null order by submitted_at', [id])).rows;
       if (!reports.length) throw new ConflictException('لم يُرفع تقرير بعد. ألغِ التكليف إن لم يعد لازماً.');
       if (reports.some((r) => r.inspector_id === actor.id)) throw new ForbiddenException('لا يعتمد الكشفَ من قام به');
       const fam = (await c.query('select id, family_no, status, created_by, inspection_delta from families where id = $1 for update', [i.family_id])).rows[0];
@@ -344,11 +346,13 @@ export class InspectionsService {
         if (!input.points) throw new BadRequestException('اكتب عدد النقاط');
         if (input.points > cap) throw new BadRequestException(`أقصى ما يغيّره الكشف ${cap} نقاط`);
         deltaAfter = Math.max(-cap, Math.min(cap, deltaBefore + (input.effect === 'RAISE' ? input.points : -input.points)));
-        if (deltaAfter === deltaBefore) throw new ConflictException(`بلغ تعديل الكشف على هذه العائلة حدّه (${deltaBefore > 0 ? '+' : ''}${deltaBefore})`);
+        if (deltaAfter === deltaBefore) throw new ConflictException(`بلغ تعديل الكشف على هذه العائلة حدّه (${deltaBefore > 0 ? 'رفع' : 'خفض'} ${Math.abs(deltaBefore)})`);
         effect = input.effect === 'RAISE' ? 'RAISED' : 'LOWERED';
         points = Math.abs(deltaAfter - deltaBefore);
       }
       let after = before;
+      let familyApproved = false;
+      if (input.approveFamily && input.effect === 'REMOVE') throw new BadRequestException('لا تُعتمد عائلة وتُشطب في قرار واحد');
       if (input.effect === 'REMOVE') {
         const reason = input.note ?? real.find((r) => r.recommendation === 'REMOVE')?.reason;
         await this.families.removeIn(c, fam.id, `كشف ميداني رقم ${i.no}: ${reason}`, actor);
@@ -356,18 +360,22 @@ export class InspectionsService {
         after = null;
       } else {
         await c.query('update families set inspection_delta = $2, inspected_at = now() where id = $1', [fam.id, deltaAfter]);
-        if (deltaAfter !== deltaBefore) {
+        if (input.approveFamily) {
+          // الكشف شهادة ثانية على السجل: من اعتمده وليس مسجِّلَ العائلة فله أن يعتمد تسجيلها معه. والاعتماد يحسب نقاطها بالتعديل.
+          await this.families.approveIn(c, fam.id, `بعد الكشف الميداني رقم ${i.no}`, actor);
+          familyApproved = true;
+        } else if (deltaAfter !== deltaBefore) {
           await this.scoring.recompute(c, fam.id);
-          after = (await c.query('select points, class from family_scores where family_id = $1', [fam.id])).rows[0] ?? null;
         }
+        if (familyApproved || deltaAfter !== deltaBefore) after = (await c.query('select points, class from family_scores where family_id = $1', [fam.id])).rows[0] ?? null;
       }
       await c.query(
         `update inspections set status = 'APPROVED', decided_by = $2, decided_at = now(), decision_note = $3, effect = $4, points = $5, delta_before = $6, delta_after = $7,
-                points_before = $8, points_after = $9, class_before = $10, class_after = $11 where id = $1`,
-        [id, actor.id, input.note ?? null, effect, points, deltaBefore, deltaAfter, before?.points ?? null, after?.points ?? null, before?.class ?? null, after?.class ?? null]);
+                points_before = $8, points_after = $9, class_before = $10, class_after = $11, family_approved = $12 where id = $1`,
+        [id, actor.id, input.note ?? null, effect, points, deltaBefore, deltaAfter, before?.points ?? null, after?.points ?? null, before?.class ?? null, after?.class ?? null, familyApproved]);
       await this.audit.append(c, {
         actorId: actor.id, action: 'inspection.approve', entity: 'inspection', entityId: id,
-        payload: { no: i.no, familyNo: fam.family_no, effect, points, deltaBefore, deltaAfter, pointsBefore: before?.points ?? null, pointsAfter: after?.points ?? null, note: input.note ?? null },
+        payload: { no: i.no, familyNo: fam.family_no, effect, points, deltaBefore, deltaAfter, pointsBefore: before?.points ?? null, pointsAfter: after?.points ?? null, familyApproved, note: input.note ?? null },
       });
     });
     return this.get(id);
@@ -411,6 +419,7 @@ export class InspectionsService {
       decidedBy: r.decided_by_username as string | null, decidedAt: r.decided_at, decisionNote: r.decision_note as string | null,
       effect: r.effect as 'NONE' | 'RAISED' | 'LOWERED' | 'REMOVED' | null, points: r.points as number | null, deltaBefore: r.delta_before as number | null, deltaAfter: r.delta_after as number | null,
       pointsBefore: r.points_before as number | null, pointsAfter: r.points_after as number | null, classBefore: r.class_before as string | null, classAfter: r.class_after as string | null,
+      familyApproved: r.family_approved as boolean,
     };
   }
 

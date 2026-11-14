@@ -99,6 +99,9 @@ cd ../admin && ADMIN_PASSWORD=... node e2e/families.cjs
 
 ```bash
 cd apps/mobile
-ADMIN_PASSWORD=... BASE_URL=http://localhost:3000 node e2e/mobile.cjs   # 19 خطوة: متصلاً ومنقطعاً والمزامنة
-ADMIN_PASSWORD=... BASE_URL=http://localhost:3000 node e2e/scan.cjs     # الماسح بكاميرا وهمية
+ADMIN_PASSWORD=... BASE_URL=http://localhost:3000 node e2e/mobile.cjs    # 21 خطوة: متصلاً ومنقطعاً والمزامنة
+ADMIN_PASSWORD=... BASE_URL=http://localhost:3000 node e2e/scan.cjs      # الماسح بكاميرا وهمية
+ADMIN_PASSWORD=... BASE_URL=http://localhost:3000 node e2e/agent.cjs     # المتعهد: حصته والتخويل (يحتاج اللوحة على ADMIN_URL)
+ADMIN_PASSWORD=... BASE_URL=http://localhost:3000 node e2e/collector.cjs # المتعهد محصِّلاً: الصناديق والتبرعات والذمة والطلبات
+ADMIN_PASSWORD=... BASE_URL=http://localhost:3000 node e2e/inspect.cjs   # الكشف الميداني من الهاتف دون اتصال
 ```

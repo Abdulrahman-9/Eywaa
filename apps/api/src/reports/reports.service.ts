@@ -34,7 +34,7 @@ export class ReportsService {
 
   async familiesCsv(filter: { class?: string; status?: string }) {
     const { rows } = await this.db.query(
-      `select f.family_no, h.full_name, f.status, sc.class, sc.points, f.tags::text[] as tags, f.mahalla, f.phone1, f.housing,
+      `select f.family_no, h.full_name, f.status, sc.class, sc.points, f.tags::text[] as tags, f.mahalla, f.phone1, f.housing, f.inspected_at, f.inspection_delta,
               (select count(*) from persons p where p.family_id = f.id and p.status = 'ACTIVE')::int as members,
               coalesce((select sum(amount_iqd) from income_sources i where i.family_id = f.id), 0)::int as income
        from families f left join persons h on h.family_id = f.id and h.relation = 'HEAD' left join family_scores sc on sc.family_id = f.id
@@ -43,8 +43,9 @@ export class ReportsService {
       [filter.class ?? null, filter.status ?? null],
     );
     return toCsv(
-      ['رقم العائلة', 'رب الأسرة', 'الحال', 'الفئة', 'النقاط', 'الأفراد', 'الدخل الشهري', 'الفئات', 'المحلة', 'الهاتف'],
-      rows.map((r) => [r.family_no, r.full_name, STATUS_AR[r.status], r.class ? CLASS_AR[r.class] : '', r.points, r.members, r.income, r.tags.map((t: string) => TAG_AR[t]).join('، '), r.mahalla, r.phone1]),
+      ['رقم العائلة', 'رب الأسرة', 'الحال', 'الفئة', 'النقاط', 'الأفراد', 'الدخل الشهري', 'الفئات', 'المحلة', 'الهاتف', 'الكشف الميداني', 'تعديل الكشف'],
+      rows.map((r) => [r.family_no, r.full_name, STATUS_AR[r.status], r.class ? CLASS_AR[r.class] : '', r.points, r.members, r.income, r.tags.map((t: string) => TAG_AR[t]).join('، '), r.mahalla, r.phone1,
+        r.inspected_at ? `مكشوفة ${new Date(r.inspected_at).toISOString().slice(0, 10)}` : 'غير مكشوفة', r.inspection_delta || '']),
     );
   }
 
