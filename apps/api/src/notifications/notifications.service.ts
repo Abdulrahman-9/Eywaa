@@ -14,6 +14,8 @@ export const audienceSchema = z.object({
   classes: z.array(z.enum(['A', 'B', 'C', 'D'])).min(1).optional(),
   tagsAny: z.array(z.string()).min(1).optional(),
   mahalla: z.string().trim().min(1).optional(),
+  /** تنبيه فردي: عائلة بعينها. */
+  familyId: z.string().uuid().optional(),
 }).strict();
 export type Audience = z.infer<typeof audienceSchema>;
 
@@ -63,7 +65,7 @@ export class NotificationsService {
          and ($6::text is null or f.mahalla = $6)
          and ($7::uuid is null or f.id = $7)
        order by f.family_no`,
-      [a.campaignId ?? null, !!a.pendingOnly, a.pointId ?? null, a.classes ?? null, a.tagsAny ?? null, a.mahalla ?? null, onlyFamily ?? null],
+      [a.campaignId ?? null, !!a.pendingOnly, a.pointId ?? null, a.classes ?? null, a.tagsAny ?? null, a.mahalla ?? null, onlyFamily ?? a.familyId ?? null],
     );
     return rows.map((r) => ({
       familyId: r.id, familyNo: r.family_no, headName: r.head_name, phone: r.phone1, hasWhatsapp: r.has_whatsapp, prefersVoice: r.prefers_voice,

@@ -107,6 +107,21 @@ describe('الإرسال الجماعي', () => {
     channels.use(new SimulatedDriver());
   });
 
+  it('التنبيه الفردي يصل عائلة واحدة بعينها، باسمها، ويظهر في رسائلها', async () => {
+    const one = { title: 'استدعاء', body: 'السلام عليكم {الاسم}. نرجو مراجعة المركز. رقمكم {رقم_العائلة}', audience: { familyId: fams[1].id } };
+    const p = await post('/notifications/preview', 'supervisor', one);
+    expect(p.body).toMatchObject({ recipients: 1, byChannel: { WHATSAPP: 0, SMS: 1, VOICE: 0, NO_PHONE: 0 }, needsApproval: false });
+    expect(p.body.sample).toContain(fams[1].familyNo);
+    const res = await post('/notifications', 'supervisor', one);
+    expect(res.body).toMatchObject({ recipients: 1, byStatus: { SENT: 1 } });
+    const mine = (await get(`/families/${fams[1].id}/messages`, 'supervisor')).body;
+    expect(mine[0]).toMatchObject({ title: 'استدعاء', status: 'SENT', channel: 'SMS' });
+    const others = (await get(`/families/${fams[0].id}/messages`, 'supervisor')).body;
+    expect(others.some((m: any) => m.title === 'استدعاء')).toBe(false);
+    expect((await post('/notifications', 'researcher', one)).status).toBe(403);
+    expect((await post('/notifications/preview', 'supervisor', { ...one, audience: { familyId: 'x' } })).status).toBe(400);
+  });
+
   it('ما فوق الحدّ لا يخرج حتى يعتمده موظف آخر', async () => {
     await api().put('/api/settings/bulk_message_approval_threshold').set(as('admin')).send({ value: 2 });
     const before = (await sql('select count(*)::int as n from messages')).rows[0].n;

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Attachments } from '../components/Attachments';
 import { ChangeDialog } from '../components/ChangeDialog';
+import { FamilyMessages, MESSAGE_READERS } from '../components/FamilyMessages';
 import { FamilyReassessments } from '../components/Reassessments';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
@@ -220,6 +221,7 @@ export function Family() {
         </div>
       </div>
 
+      {user && MESSAGE_READERS.includes(user.role) && f.status === 'APPROVED' && <FamilyMessages familyId={f.id} familyNo={f.familyNo} hasPhone={!!f.phone1} />}
       {user && ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'AUDITOR'].includes(user.role) && f.status === 'APPROVED' && <FamilyReassessments familyId={f.id} familyNo={f.familyNo} approved />}
       <ReasonDialog open={dialog === 'approve'} title={`اعتماد العائلة ${f.familyNo}`} confirmLabel="اعتماد" required={false}
         pending={decide.isPending} error={decide.error?.message} onClose={() => { decide.reset(); setDialog(null); }}
