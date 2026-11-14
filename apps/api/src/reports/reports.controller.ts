@@ -72,7 +72,7 @@ export class ReportsController {
   /** تصدير أسماء العوائل وهواتفها يُسجَّل باسم مصدّره. */
   @Get('reports/families.csv')
   @Roles('ADMIN', 'BENEFICIARY_SUPERVISOR', 'AUDITOR')
-  async familiesCsv(@Query(new ZodPipe(z.object({ class: z.enum(['A', 'B', 'C', 'D']).optional(), status: z.enum(['APPROVED', 'PENDING_APPROVAL', 'PENDING_DEDUPE_REVIEW', 'REJECTED']).optional() }))) q: { class?: string; status?: string }, @CurrentUser() user: AuthUser, @Res() res: Response) {
+  async familiesCsv(@Query(new ZodPipe(z.object({ class: z.enum(['A', 'B', 'C', 'D']).optional(), status: z.enum(['APPROVED', 'PENDING_APPROVAL', 'PENDING_DEDUPE_REVIEW', 'REJECTED', 'REMOVED']).optional() }))) q: { class?: string; status?: string }, @CurrentUser() user: AuthUser, @Res() res: Response) {
     const csv = await this.reports.familiesCsv(q);
     await this.db.tx((c) => this.audit.append(c, { actorId: user.id, action: 'report.export', entity: 'report', entityId: 'families', payload: { ...q, rows: csv.split('\r\n').length - 2 } }));
     sendCsv(res, 'العوائل', csv);

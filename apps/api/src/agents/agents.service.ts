@@ -7,6 +7,7 @@ import { AuthUser } from '../auth/auth.guard';
 import { normalizeName, toAsciiDigits } from '../common/arabic';
 import { Db } from '../db/db.module';
 import { phone } from '../families/families.schema';
+import { INSPECTION_LATE_DAYS } from '../inspections/inspections.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -105,6 +106,7 @@ const ACTIVITY: Record<string, (p: any) => string> = {
   'grant.case': (p) => `صرف حالة بتخويل، طلب تسجيل ${p.quickNo ?? ''}`,
   'quick.create': (p) => `رفع طلب إضافة عائلة رقم ${p.no ?? ''}`,
   'reassessment.open': (p) => `طلب تعديل بيانات عائلة${p.familyNo ? ` ${p.familyNo}` : ''}`,
+  'inspection.report': (p) => `رفع كشف العائلة ${p.familyNo ?? ''}: ${({ CONFIRM: 'مطابقة', RAISE: 'يوصي برفع النقاط', LOWER: 'يوصي بخفض النقاط', REMOVE: 'يطلب شطبها', UNABLE: 'تعذّر الكشف' } as Record<string, string>)[p.recommendation] ?? ''}${p.mismatches ? `، وفيها ${p.mismatches} بند غير مطابق` : ''}`,
   'box.collect': (p) => `فتح الصندوق ${p.code ?? ''} وعدّ فيه ${fmt(Number(p.amount ?? 0))}`,
   'donation.report': (p) => (p.kind === 'CASH' ? `سجّل تبرعاً نقدياً ${fmt(Number(p.amount ?? 0))} من ${p.donor ?? ''}` : `بلّغ بتبرع عيني من ${p.donor ?? ''}: ${p.quantity ?? ''} ${p.item ?? ''}`),
   'custody.receive': (p) => `سلّم المحاسبَ ${fmt(Number(p.amount ?? 0))} من ذمته، وبقي فيها ${fmt(Number(p.remaining ?? 0))}`,
@@ -559,6 +561,10 @@ export class AgentsService {
       (select count(*) from stock_moves m join warehouses w on w.id = m.to_wh where w.point_id = p.id and m.kind = 'TRANSFER' and m.status = 'POSTED'
          and not exists (select 1 from custody_acks a where a.stock_move_id = m.id))::int as unacked,
       (select count(*) from custody_acks a where a.agent_id = u.id and not a.ok)::int as disputes,
+      (select count(*) from inspection_reports r where r.inspector_id = u.id and r.submitted_at > now() - interval '30 days')::int as inspections,
+      (select count(*) from inspection_reports r join inspections i on i.id = r.inspection_id where r.inspector_id = u.id and r.submitted_at is null and i.status = 'ASSIGNED')::int as pending_inspections,
+      (select count(*) from inspection_reports r join inspections i on i.id = r.inspection_id where r.inspector_id = u.id and r.submitted_at is null and i.status = 'ASSIGNED'
+         and i.requested_at < now() - make_interval(days => ${INSPECTION_LATE_DAYS}))::int as late_inspections,
       (select max(at) from audit_log where actor_id = u.id) as last_activity
     from users u left join distribution_points p on p.agent_id = u.id where u.role = 'DISTRIBUTION_AGENT'`;
 
@@ -575,13 +581,14 @@ export class AgentsService {
     if (r.unacked) alerts.push(`${r.unacked} تحويل مخزني لم يؤكد استلامه`);
     if (r.disputes) alerts.push(`${r.disputes} بلاغ فرق في مواد حُوّلت إليه`);
     if (r.open_reports) alerts.push(`${r.open_reports} تبرع عيني بلّغ به ولم يُستلم`);
+    if (r.late_inspections) alerts.push(`${r.late_inspections} كشف كُلّف به منذ أكثر من ${INSPECTION_LATE_DAYS} أيام ولم يرفعه`);
     return {
       id: r.id as string, fullName: r.full_name as string, username: r.username as string, phone: r.phone as string | null, active: r.active as boolean, since: r.created_at, pointId: r.point_id as string | null,
       custody, custodyDays, lastHandover: r.last_handover, goods: r.goods as number, goodsItems: r.goods_items as number,
-      boxes: r.boxes as number, staleBoxes: r.stale_boxes as number, pendingDeliveries: r.pending_deliveries as number, openReports: r.open_reports as number, unacked: r.unacked as number, disputes: r.disputes as number,
+      boxes: r.boxes as number, staleBoxes: r.stale_boxes as number, pendingInspections: r.pending_inspections as number, pendingDeliveries: r.pending_deliveries as number, openReports: r.open_reports as number, unacked: r.unacked as number, disputes: r.disputes as number,
       last30: {
         deliveries: r.deliveries as number, collections: r.collections as number, collected: Number(r.collected), cashDonations: r.cash_donations as number, cashDonated: Number(r.cash_donated),
-        inKindDonations: r.kind_donations as number, additions: r.additions as number, edits: r.edits as number,
+        inKindDonations: r.kind_donations as number, additions: r.additions as number, edits: r.edits as number, inspections: r.inspections as number,
       },
       lastActivity: r.last_activity, alerts,
     };

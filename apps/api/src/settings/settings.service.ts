@@ -10,6 +10,10 @@ export const SETTINGS = {
     label: 'خط الفقر: دخل الفرد الشهري بالدينار',
     schema: z.number().int().min(1).max(100_000_000),
   },
+  inspection_max_delta: {
+    label: 'أقصى ما يرفعه الكشف الميداني أو يخفضه من نقاط العائلة',
+    schema: z.number().int().min(0).max(50),
+  },
   bulk_message_approval_threshold: {
     label: 'عدد الرسائل الذي يحتاج ما فوقه اعتماداً',
     schema: z.number().int().min(1).max(1_000_000),

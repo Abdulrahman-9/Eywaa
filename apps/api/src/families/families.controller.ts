@@ -7,11 +7,12 @@ import {
 } from './families.schema';
 import { FamiliesService } from './families.service';
 
-const STATUSES = ['PENDING_DEDUPE_REVIEW', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED'] as const;
+const STATUSES = ['PENDING_DEDUPE_REVIEW', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'REMOVED'] as const;
 const listSchema = z.object({
   status: z.enum(STATUSES).optional(),
   q: z.string().optional(),
   class: z.enum(['A', 'B', 'C', 'D']).optional(),
+  inspection: z.enum(['NONE', 'OPEN', 'DONE']).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -72,6 +73,13 @@ export class FamiliesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.families.decide(id, 'REJECTED', body.note, user);
+  }
+
+  @Post('families/:id/restore')
+  @HttpCode(200)
+  @Roles('ADMIN', 'BENEFICIARY_SUPERVISOR')
+  restore(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(z.object({ note: z.string().trim().min(3, 'يلزم ذكر السبب').max(300) }))) body: { note: string }, @CurrentUser() user: AuthUser) {
+    return this.families.restore(id, body.note, user);
   }
 
   @Get('duplicate-flags')

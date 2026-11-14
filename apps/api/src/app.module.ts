@@ -24,6 +24,8 @@ import { GrantsController } from './grants/grants.controller';
 import { GrantsService } from './grants/grants.service';
 import { HousingController } from './housing/housing.controller';
 import { HousingService } from './housing/housing.service';
+import { InspectionsController } from './inspections/inspections.controller';
+import { InspectionsService } from './inspections/inspections.service';
 import { InventoryController } from './inventory/inventory.controller';
 import { InventoryService } from './inventory/inventory.service';
 import { Channels } from './notifications/channels';
@@ -52,10 +54,10 @@ import { UsersController } from './users/users.controller';
   imports: [DbModule],
   controllers: [
     AuthController, UsersController, DevicesController, AuditController, SettingsController, StatsController,
-    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController, PayoutsController, ReassessmentsController, QuickController, GrantsController, AgentsController,
+    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController, PayoutsController, ReassessmentsController, QuickController, GrantsController, AgentsController, InspectionsController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, MessageWorker, InventoryService, AccountingService, DistributionService, MonitorService, HousingService, DonorsService, ReportsService, PayoutsService, ReassessmentsService, QuickService, GrantsService, AgentsService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, MessageWorker, InventoryService, AccountingService, DistributionService, MonitorService, HousingService, DonorsService, ReportsService, PayoutsService, ReassessmentsService, QuickService, GrantsService, AgentsService, InspectionsService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

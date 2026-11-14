@@ -104,6 +104,7 @@ export class ChangesService {
       const fam = await c.query('select status from families where id = $1', [familyId]);
       if (!fam.rows[0]) throw new NotFoundException('العائلة غير موجودة');
       if (fam.rows[0].status === 'REJECTED') throw new ConflictException('لا يُعدَّل سجل مرفوض');
+      if (fam.rows[0].status === 'REMOVED') throw new ConflictException('العائلة مشطوبة: لا يُعدَّل سجلها حتى تُعاد');
       // الأسماء تُحفظ مع الطلب ليقرأها المعتمِد؛ والتنفيذ يعتمد المعرّفات وحدها.
       const names = await this.precheck(c, familyId, type, payload);
       const { rows } = await c.query(

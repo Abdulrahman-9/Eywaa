@@ -4,13 +4,13 @@ import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
 import { Db } from '../db/db.module';
 import { SettingsService } from '../settings/settings.service';
-import { computeScore, Criteria, criteriaSchema, Facts, maxTotal, Score, Thresholds, thresholdsSchema } from './formula';
+import { adjust, computeScore, Criteria, criteriaSchema, Facts, maxTotal, Score, Thresholds, thresholdsSchema } from './formula';
 
 type Queryable = { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> };
 
 /** وقائع العوائل المعتمدة كلها في استعلام واحد. */
 const FACTS_SQL = `
-  select f.id, f.family_no, f.housing,
+  select f.id, f.family_no, f.housing, f.inspection_delta,
          (f.tags::text[] && array['WIDOW','DIVORCED','UNMARRIED']) as female_head,
          coalesce((select sum(amount_iqd) from income_sources i where i.family_id = f.id), 0)::int as income,
          count(p.id) filter (where p.status = 'ACTIVE')::int as members,
@@ -51,15 +51,18 @@ export class ScoringService {
     const line = await this.povertyLine(q);
     const { rows } = await q.query(FACTS_SQL, [familyId]);
     if (!rows.length) return 0;
-    const scores = rows.map((r) => ({ id: r.id as string, ...computeScore(toFacts(r), v.criteria, v.thresholds, line) }));
+    const max = maxTotal(v.criteria);
+    // مجموع المعادلة، ثم تعديل الكشف الميداني المعتمَد على العائلة إن وُجد.
+    const scores = rows.map((r) => ({ id: r.id as string, ...adjust(computeScore(toFacts(r), v.criteria, v.thresholds, line), r.inspection_delta, v.thresholds, max) }));
     await q.query(
-      `insert into family_scores (family_id, version, points, class, breakdown, computed_at)
-       select x.id, $1, x.points, x.class, x.breakdown, now()
-       from unnest($2::uuid[], $3::int[], $4::text[], $5::jsonb[]) as x(id, points, class, breakdown)
+      `insert into family_scores (family_id, version, points, class, breakdown, base_points, adjustment, computed_at)
+       select x.id, $1, x.points, x.class, x.breakdown, x.base, x.adjustment, now()
+       from unnest($2::uuid[], $3::int[], $4::text[], $5::jsonb[], $6::int[], $7::int[]) as x(id, points, class, breakdown, base, adjustment)
        on conflict (family_id) do update
          set version = excluded.version, points = excluded.points, class = excluded.class,
-             breakdown = excluded.breakdown, computed_at = now()`,
-      [v.version, scores.map((s) => s.id), scores.map((s) => s.points), scores.map((s) => s.class), scores.map((s) => JSON.stringify(s.breakdown))],
+             breakdown = excluded.breakdown, base_points = excluded.base_points, adjustment = excluded.adjustment, computed_at = now()`,
+      [v.version, scores.map((s) => s.id), scores.map((s) => s.points), scores.map((s) => s.class), scores.map((s) => JSON.stringify(s.breakdown)),
+       scores.map((s) => s.base), scores.map((s) => s.adjustment)],
     );
     return scores.length;
   }
@@ -71,10 +74,16 @@ export class ScoringService {
   }
 
   async familyScore(familyId: string) {
-    const { rows } = await this.db.query('select version, points, class, breakdown, computed_at from family_scores where family_id = $1', [familyId]);
+    const { rows } = await this.db.query('select version, points, class, breakdown, base_points, adjustment, computed_at from family_scores where family_id = $1', [familyId]);
     if (!rows[0]) return null;
     const r = rows[0];
-    return { version: r.version, points: r.points, class: r.class, breakdown: r.breakdown, computedAt: r.computed_at };
+    return { version: r.version, points: r.points, class: r.class, breakdown: r.breakdown, base: r.base_points, adjustment: r.adjustment, computedAt: r.computed_at };
+  }
+
+  /** ما يلزم لمعاينة أثر تعديل قبل اعتماده: حدود الفئات، وأقصى المعادلة. */
+  async scale(q: Queryable = this.db) {
+    const v = await this.active(q);
+    return { thresholds: v.thresholds, max: maxTotal(v.criteria) };
   }
 
   async overview() {
@@ -128,7 +137,7 @@ export class ScoringService {
     const after = { A: 0, B: 0, C: 0, D: 0 } as Record<string, number>;
     const affected: { familyId: string; familyNo: string; headName: string; from: string; to: string; oldPoints: number; newPoints: number }[] = [];
     for (const r of rows) {
-      const next: Score = computeScore(toFacts(r), draft.criteria, draft.thresholds, line);
+      const next: Score = adjust(computeScore(toFacts(r), draft.criteria, draft.thresholds, line), r.inspection_delta, draft.thresholds, maxTotal(draft.criteria));
       after[next.class]++;
       const from = r.old_class ?? next.class;
       if (from !== next.class) {

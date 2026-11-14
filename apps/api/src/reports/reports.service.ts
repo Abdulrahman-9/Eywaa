@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Db } from '../db/db.module';
 
 const CLASS_AR: Record<string, string> = { A: 'أ', B: 'ب', C: 'ج', D: 'د' };
-const STATUS_AR: Record<string, string> = { APPROVED: 'معتمد', PENDING_APPROVAL: 'بانتظار الاعتماد', PENDING_DEDUPE_REVIEW: 'شبهة تكرار', REJECTED: 'مرفوض' };
+const STATUS_AR: Record<string, string> = { APPROVED: 'معتمد', PENDING_APPROVAL: 'بانتظار الاعتماد', PENDING_DEDUPE_REVIEW: 'شبهة تكرار', REJECTED: 'مرفوض', REMOVED: 'مشطوب' };
 const TAG_AR: Record<string, string> = { ORPHANS: 'أيتام', WIDOW: 'أرامل', DISABLED: 'معاقون', SICK: 'مرضى', DIVORCED: 'مطلقات', NEEDY: 'متعففون', UNMARRIED: 'عوانس' };
 
 /** CSV يفتحه Excel بالعربية: علامة BOM في أوله، وكل خانة بين علامتَي تنصيص. */

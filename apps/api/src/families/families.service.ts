@@ -366,9 +366,9 @@ export class FamiliesService implements OnModuleInit {
 
   async get(id: string) {
     const fam = await this.db.query(
-      `select f.*, f.tags::text[] as tags, cu.username as created_by_username, du.username as decided_by_username,
+      `select f.*, f.tags::text[] as tags, cu.username as created_by_username, du.username as decided_by_username, ru.username as removed_by_username,
               sc.points as score_points, sc.class as score_class
-       from families f join users cu on cu.id = f.created_by left join users du on du.id = f.decided_by
+       from families f join users cu on cu.id = f.created_by left join users du on du.id = f.decided_by left join users ru on ru.id = f.removed_by
          left join family_scores sc on sc.family_id = f.id
        where f.id = $1`,
       [id],
@@ -462,6 +462,9 @@ export class FamiliesService implements OnModuleInit {
         id: r.id, reason: r.reason, score: Number(r.score), status: r.status, note: r.note,
         personName: r.person_name, matchedPersonName: r.matched_person_name, matchedFamilyNo: r.matched_family_no,
       })),
+      inspectedAt: f.inspected_at,
+      inspectionDelta: f.inspection_delta as number,
+      removal: f.status === 'REMOVED' ? { by: f.removed_by_username as string, at: f.removed_at, note: f.remove_note as string } : null,
       createdBy: f.created_by_username,
       createdAt: f.created_at,
       decidedBy: f.decided_by_username,
@@ -470,14 +473,15 @@ export class FamiliesService implements OnModuleInit {
     };
   }
 
-  async list(params: { status?: string; q?: string; class?: string; limit: number; offset: number }) {
+  async list(params: { status?: string; q?: string; class?: string; inspection?: 'NONE' | 'OPEN' | 'DONE'; limit: number; offset: number }) {
     const q = params.q?.trim();
     const digits = q ? toAsciiDigits(q).replace(/\D/g, '') : '';
     const isNumeric = !!q && digits.length > 0 && /^[\d٠-٩\s+]+$/.test(q);
     const nameNorm = q && !isNumeric ? normalizeName(q) : null;
     const { rows } = await this.db.query(
       `select f.id, f.family_no, f.status, f.tags::text[] as tags, f.phone1, f.created_at, h.full_name as head_name,
-              sc.points as score_points, sc.class as score_class,
+              sc.points as score_points, sc.class as score_class, f.inspected_at, f.inspection_delta,
+              exists (select 1 from inspections i where i.family_id = f.id and i.status in ('ASSIGNED', 'SUBMITTED')) as inspecting,
               (select count(*) from persons p where p.family_id = f.id and p.status = 'ACTIVE')::int as members
        from families f left join persons h on h.family_id = f.id and h.relation = 'HEAD'
          left join family_scores sc on sc.family_id = f.id
@@ -487,15 +491,22 @@ export class FamiliesService implements OnModuleInit {
          and ($3::text is null or exists (
                select 1 from persons p where p.family_id = f.id and p.name_norm like '%' || $3 || '%'))
          and ($6::text is null or sc.class = $6)
+         and ($8::text is null
+              or ($8 = 'OPEN' and exists (select 1 from inspections i where i.family_id = f.id and i.status in ('ASSIGNED', 'SUBMITTED')))
+              or ($8 = 'DONE' and f.inspected_at is not null)
+              or ($8 = 'NONE' and f.inspected_at is null and not exists (select 1 from inspections i where i.family_id = f.id and i.status in ('ASSIGNED', 'SUBMITTED'))))
        order by f.created_at desc limit $4 offset $5`,
       [params.status ?? null, isNumeric ? digits : null, nameNorm, params.limit, params.offset, params.class ?? null,
        // رقم الوثيقة وحده، بأي نوع كانت: البطاقة الوطنية، أو هوية الأحوال بلا سجلها.
-       isNumeric ? (['NATIONAL_CARD', 'CIVIL_ID', 'NATIONALITY_CERT'] as const).map((t) => this.crypto.blindIndex(documentNumberKey(t, digits))) : null],
+       isNumeric ? (['NATIONAL_CARD', 'CIVIL_ID', 'NATIONALITY_CERT'] as const).map((t) => this.crypto.blindIndex(documentNumberKey(t, digits))) : null,
+       params.inspection ?? null],
     );
     return rows.map((r) => ({
       id: r.id, familyNo: r.family_no, status: r.status, tags: r.tags, phone1: r.phone1,
       headName: r.head_name, members: r.members, createdAt: r.created_at,
       score: r.score_class ? { points: r.score_points, class: r.score_class } : null,
+      // الكشف الميداني: مكشوفة (اعتُمد عليها كشف)، قيد الكشف (كُلّف به ولم يُفصل فيه)، أو غير مكشوفة.
+      inspection: { state: r.inspecting ? 'OPEN' : r.inspected_at ? 'DONE' : 'NONE', at: r.inspected_at, delta: r.inspection_delta as number },
     }));
   }
 
@@ -561,6 +572,50 @@ export class FamiliesService implements OnModuleInit {
       actorId: actor.id, action: decision === 'APPROVED' ? 'family.approve' : 'family.reject',
       entity: 'family', entityId: id, payload: { note: note ?? null },
     });
+  }
+
+  // ---------- الشطب والإعادة ----------
+
+  /**
+   * شطب عائلة من المستفيدين داخل معاملة قائمة (يستعمله اعتماد الكشف الميداني).
+   * المعتمدة تُشطب ويبقى سجلها ووثائقها محجوزة؛ والتي لم تُعتمد بعد يُرفض سجلها كما يُرفض أي تسجيل.
+   * ما بقي لها من استحقاق لم يُسلَّم يسقط: يُلغى في الحملة الجارية، ويُحذف مما لم يبدأ.
+   */
+  async removeIn(c: PoolClient, id: string, note: string, actor: AuthUser): Promise<'REMOVED' | 'REJECTED'> {
+    const f = (await c.query('select status, created_by from families where id = $1 for update', [id])).rows[0];
+    if (!f) throw new NotFoundException('العائلة غير موجودة');
+    if (f.status === 'PENDING_APPROVAL' || f.status === 'PENDING_DEDUPE_REVIEW') {
+      if (f.created_by === actor.id) throw new ForbiddenException('لا يفصل الموظف في سجل أدخله بنفسه');
+      await this.applyDecision(c, id, 'REJECTED', note, actor);
+      return 'REJECTED';
+    }
+    if (f.status !== 'APPROVED') throw new ConflictException('العائلة مرفوضة أو مشطوبة من قبل');
+    await c.query("update families set status = 'REMOVED', removed_by = $2, removed_at = now(), remove_note = $3 where id = $1", [id, actor.id, note]);
+    await c.query('delete from family_scores where family_id = $1', [id]);
+    const cancelled = await c.query(
+      `update entitlements e set status = 'CANCELLED' from campaigns c
+       where c.id = e.campaign_id and e.family_id = $1 and e.status = 'PENDING' and c.status = 'ACTIVE'`, [id]);
+    const dropped = await c.query(
+      `delete from entitlements e using campaigns c
+       where c.id = e.campaign_id and e.family_id = $1 and e.status = 'PENDING' and c.status in ('DRAFT', 'PENDING_APPROVAL')`, [id]);
+    // زيارة إعادة تقييم لم تقع بعد لا معنى لها بعد الشطب.
+    await c.query("update reassessments set status = 'CANCELLED', closed_by = $2, closed_at = now(), close_note = $3 where family_id = $1 and status = 'OPEN'", [id, actor.id, `شُطبت العائلة: ${note}`]);
+    await this.audit.append(c, { actorId: actor.id, action: 'family.remove', entity: 'family', entityId: id, payload: { note, cancelledEntitlements: cancelled.rowCount, droppedEntitlements: dropped.rowCount } });
+    return 'REMOVED';
+  }
+
+  /** إعادة عائلة مشطوبة إلى المستفيدين: بسبب مكتوب، ولا يعيدها من شطبها. تعود معتمدة وتُحسب نقاطها من جديد. */
+  async restore(id: string, note: string, actor: AuthUser) {
+    await this.db.tx(async (c) => {
+      const f = (await c.query('select status, removed_by from families where id = $1 for update', [id])).rows[0];
+      if (!f) throw new NotFoundException('العائلة غير موجودة');
+      if (f.status !== 'REMOVED') throw new ConflictException('العائلة ليست مشطوبة');
+      if (f.removed_by === actor.id) throw new ForbiddenException('لا يعيد العائلة من شطبها');
+      await c.query("update families set status = 'APPROVED', removed_by = null, removed_at = null, remove_note = null where id = $1", [id]);
+      await this.scoring.recompute(c, id);
+      await this.audit.append(c, { actorId: actor.id, action: 'family.restore', entity: 'family', entityId: id, payload: { note } });
+    });
+    return this.get(id);
   }
 
   // ---------- شبهات التكرار ----------

@@ -44,6 +44,18 @@ export interface Facts {
 
 export interface Line { key: keyof Criteria; label: string; got: number; max: number; why: string }
 export interface Score { points: number; class: 'A' | 'B' | 'C' | 'D'; breakdown: Line[] }
+export interface AdjustedScore extends Score { base: number; adjustment: number }
+
+export const classOf = (points: number, t: Thresholds): Score['class'] => (points >= t.a ? 'A' : points >= t.b ? 'B' : points >= t.c ? 'C' : 'D');
+
+/**
+ * تعديل الكشف الميداني: يُضاف إلى مجموع المعادلة أو يُطرح منه، ثم تُحدَّد الفئة.
+ * لا ينزل المجموع عن صفر ولا يعلو أقصى ما تبلغه المعايير.
+ */
+export function adjust(score: Score, delta: number, t: Thresholds, max: number): AdjustedScore {
+  const points = Math.min(Math.max(score.points + delta, 0), max);
+  return { ...score, base: score.points, adjustment: delta, points, class: classOf(points, t) };
+}
 
 const HOUSING_AR = { OWNED: 'ملك', RENTED: 'إيجار', OTHER: 'أخرى' } as const;
 
@@ -65,5 +77,5 @@ export function computeScore(f: Facts, c: Criteria, t: Thresholds, povertyLineIq
     { key: 'noIncome', label: CRITERIA_LABELS.noIncome, got: f.monthlyIncomeIqd === 0 ? c.noIncome.max : 0, max: c.noIncome.max, why: f.monthlyIncomeIqd === 0 ? 'نعم' : 'لا' },
   ];
   const total = breakdown.reduce((sum, l) => sum + l.got, 0);
-  return { points: total, class: total >= t.a ? 'A' : total >= t.b ? 'B' : total >= t.c ? 'C' : 'D', breakdown };
+  return { points: total, class: classOf(total, t), breakdown };
 }
