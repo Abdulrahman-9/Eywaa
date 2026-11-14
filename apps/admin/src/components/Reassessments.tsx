@@ -9,13 +9,13 @@ import { useToast } from './toast';
 import { Alert, Badge, Button, Card, Dialog, Field, Select } from './ui';
 
 export interface Reassessment {
-  id: string; familyId: string; familyNo: string; headName: string | null; mahalla: string | null; source: 'FAMILY' | 'STAFF'; reason: string;
+  id: string; familyId: string; familyNo: string; headName: string | null; mahalla: string | null; source: 'FAMILY' | 'STAFF' | 'AGENT'; reason: string;
   status: 'OPEN' | 'VISITED' | 'CLOSED' | 'CANCELLED'; assignedTo: string | null; assignedName: string | null; openedBy: string; openedAt: string;
   visitedBy: string | null; visitedAt: string | null; findings: string | null; outcome: 'NO_CHANGE' | 'CHANGED' | null;
   closedBy: string | null; closedAt: string | null; closeNote: string | null;
 }
 export const RE_STATUS = { OPEN: ['تنتظر الزيارة', 'warn'], VISITED: ['زِيرت: تنتظر الاعتماد', 'info'], CLOSED: ['اعتُمدت', 'ok'], CANCELLED: ['أُلغيت', 'neutral'] } as const;
-const SOURCE = { FAMILY: 'بطلب العائلة', STAFF: 'من الإدارة' } as const;
+const SOURCE = { FAMILY: 'بطلب العائلة', STAFF: 'من الإدارة', AGENT: 'بطلب متعهد من الميدان' } as const;
 const OUTCOME = { NO_CHANGE: 'لم يتغيّر من حالها شيء', CHANGED: 'تغيّرت حالها' } as const;
 const FIELD = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 const DECIDERS = ['ADMIN', 'BENEFICIARY_SUPERVISOR'];

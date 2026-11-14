@@ -36,6 +36,8 @@ export const NAV: NavItem[] = [
   { to: '/programs', label: 'البرامج', roles: ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'AUDITOR'], icon: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01' },
   { to: '/campaigns', label: 'حملات التوزيع', roles: ['ADMIN', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'STOREKEEPER', 'AUDITOR'], icon: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM14 20h2M20 14v2' },
   { to: '/desk', label: 'شبّاك التسليم', roles: ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR'], icon: 'M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8' },
+  { to: '/agents', label: 'المتعهدون', roles: ['ADMIN', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'AUDITOR'], icon: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1M17 8h5M19.5 5.5v5' },
+  { to: '/boxes', label: 'صناديق التبرعات', roles: ['ADMIN', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'AUDITOR'], icon: 'M4 10h16v10H4zM3 6h18v4H3zM10 14h4M9 6V4h6v2' },
   { to: '/notify', label: 'التنبيهات', roles: ['ADMIN', 'DISTRIBUTION_MANAGER', 'BENEFICIARY_SUPERVISOR', 'AUDITOR'], icon: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4' },
   { to: '/warehouse', label: 'المخازن', roles: ['ADMIN', 'STOREKEEPER', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'AUDITOR'], icon: 'M3 9l9-6 9 6v11H3zM9 20v-6h6v6' },
   { to: '/cashbox', label: 'الصندوق والمحاسبة', roles: ['ADMIN', 'ACCOUNTANT', 'DISTRIBUTION_MANAGER', 'AUDITOR'], icon: 'M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3zM3 7V6a2 2 0 0 1 2-2h11M16 13h2' },

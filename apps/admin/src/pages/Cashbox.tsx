@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { FileText } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Skeleton } from '../components/ui';
+import { categoryLabel, VoucherDialog } from '../components/Voucher';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatDateTime, formatNumber } from '../lib/format';
@@ -11,13 +14,15 @@ import type { Donor } from './Reports';
 
 export interface Fund { id: string; name: string; note: string | null; programId: string | null; program: string | null; cash: number; custody: number; reserved: number; available: number }
 interface Summary { funds: Fund[]; receivedThisMonth: number; spentThisMonth: number; pendingEntries: number }
-interface Entry { id: string; no: string; kind: string; status: 'POSTED' | 'PENDING' | 'REJECTED'; amount: number; description: string; party: string | null; fund: string; createdBy: string; createdAt: string; reversed: boolean }
+interface Entry { id: string; no: string; kind: string; category?: string | null; status: 'POSTED' | 'PENDING' | 'REJECTED'; amount: number; description: string; party: string | null; fund: string; createdBy: string; createdAt: string; reversed: boolean }
 interface Custody { fundId: string; fund: string; userId: string; username: string; fullName: string; balance: number }
 interface Trial { lines: { fund: string; account: string; debit: number; credit: number; balance: number }[]; totalDebit: number; totalCredit: number; balanced: boolean }
 
 const KIND_AR: Record<string, string> = { RECEIPT: 'قبض', PAYMENT: 'صرف', CUSTODY_ISSUE: 'تسليم عهدة', CUSTODY_RETURN: 'إرجاع عهدة', SHORTAGE: 'عجز عهدة', OVERAGE: 'زيادة عهدة', REVERSAL: 'عكس قيد' };
+/** أبواب الصرف المعتادة. يُختار منها ليستقيم تقرير المصارف، ويُكتب غيرها عند الحاجة. */
+const SPEND_CATEGORIES = ['مشتريات مواد', 'نقل وتحميل', 'أجور ومكافآت', 'إيجار', 'وقود', 'صيانة', 'قرطاسية وطباعة', 'اتصالات', 'مصاريف إدارية'];
 const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
-type Form = 'receipt' | 'payment' | 'fund' | 'custody' | null;
+type Form = 'receipt' | 'payment' | 'fund' | 'custody' | 'receive' | null;
 
 function Stat({ label, value, note }: { label: string; value: number; note?: string }) {
   return <Card className="flex flex-col gap-0.5"><span className="text-sm text-muted">{label}</span><span className="text-3xl font-bold leading-tight tabular-nums">{formatNumber(value)}</span>{note && <span className="text-sm text-muted">{note}</span>}</Card>;
@@ -41,6 +46,7 @@ export function Cashbox() {
   const [reversing, setReversing] = useState<Entry | null>(null);
   const [closing, setClosing] = useState<Custody | null>(null);
   const [counted, setCounted] = useState('');
+  const [voucher, setVoucher] = useState<string | null>(null);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['accounting'] });
   const close = () => { setForm(null); setF({ fundId: '', amount: '', party: '', description: '', category: '', name: '', programId: '', userId: '', donorId: '' }); };
 
@@ -50,9 +56,10 @@ export function Cashbox() {
       if (form === 'receipt') return api<{ no: string }>('/accounting/receipts', { method: 'POST', body: { ...base, description: f.description.trim(), ...(f.donorId ? { donorId: f.donorId } : { party: f.party.trim() }) } });
       if (form === 'payment') return api<{ no: string }>('/accounting/payments', { method: 'POST', body: { ...base, party: f.party.trim(), description: f.description.trim(), category: f.category.trim() } });
       if (form === 'custody') return api<{ no: string }>('/accounting/custody/issue', { method: 'POST', body: { ...base, userId: f.userId } });
+      if (form === 'receive') return api<{ no: string; id?: string }>('/accounting/custody/receive', { method: 'POST', body: { ...base, userId: f.userId, ...(f.description.trim() ? { note: f.description.trim() } : {}) } });
       return api<{ no?: string }>('/accounting/funds', { method: 'POST', body: { name: f.name.trim(), programId: f.programId || null } });
     },
-    onSuccess: (r) => { toast(form === 'payment' ? `سند الصرف ${r.no} ينتظر اعتماد موظف آخر` : form === 'fund' ? 'أُنشئ الصندوق' : `سُجّل القيد ${r.no}`); close(); refresh(); },
+    onSuccess: (r) => { if (form === 'receive' && (r as { id?: string }).id) setVoucher((r as { id?: string }).id!); toast(form === 'payment' ? `سند الصرف ${r.no} ينتظر اعتماد موظف آخر` : form === 'fund' ? 'أُنشئ الصندوق' : `سُجّل القيد ${r.no}`); close(); refresh(); },
   });
   const decide = useMutation({
     mutationFn: (note: string) => api(`/accounting/entries/${deciding!.entry.id}/${deciding!.approve ? 'approve' : 'reject'}`, { method: 'POST', body: note ? { note } : {} }),
@@ -76,7 +83,7 @@ export function Cashbox() {
   );
   const diff = closing ? int(counted) - closing.balance : 0;
   const formOk = form === 'fund' ? f.name.trim().length >= 2
-    : !!f.fundId && int(f.amount) > 0 && (form === 'custody' ? !!f.userId : (f.party.trim().length >= 2 || (form === 'receipt' && !!f.donorId)) && f.description.trim().length >= 2 && (form !== 'payment' || f.category.trim().length >= 2));
+    : !!f.fundId && int(f.amount) > 0 && (form === 'custody' || form === 'receive' ? !!f.userId : (f.party.trim().length >= 2 || (form === 'receipt' && !!f.donorId)) && f.description.trim().length >= 2 && (form !== 'payment' || f.category.trim().length >= 2));
 
   return (
     <>
@@ -118,7 +125,7 @@ export function Cashbox() {
             <p className="text-sm text-muted">المال المقيَّد ببرنامج يبقى في صندوقه حتى يُصرف في حملات ذلك البرنامج.</p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[34rem] border-collapse text-sm">
-                <thead><tr className="text-muted">{['الصندوق', 'القيد', 'النقد', 'في العهد', 'محجوز لحملات', 'المتاح'].map((h) => <th key={h} scope="col" className="border-b border-line p-2 text-start font-medium">{h}</th>)}</tr></thead>
+                <thead><tr className="text-muted">{['الصندوق', 'القيد', 'النقد', 'في العهد', 'محجوز لحملات', 'المتاح', ''].map((h) => <th key={h} scope="col" className="border-b border-line p-2 text-start font-medium">{h}</th>)}</tr></thead>
                 <tbody>
                   {s.funds.map((x) => (
                     <tr key={x.id} className="border-b border-line last:border-0">
@@ -126,6 +133,7 @@ export function Cashbox() {
                       <td className="p-2">{x.program ? `لـ«${x.program}» فقط` : 'غير مقيَّد'}</td>
                       {[x.cash, x.custody, x.reserved].map((n, i) => <td key={i} className={`p-2 tabular-nums ${n < 0 ? 'font-bold text-danger' : ''}`}>{formatNumber(n)}</td>)}
                       <td className="p-2 font-bold tabular-nums">{formatNumber(x.available)}</td>
+                      <td className="p-2"><Link to={`/cashbox/funds/${x.id}`} className="inline-flex items-center gap-1 whitespace-nowrap font-semibold text-brand-strong hover:underline"><FileText aria-hidden="true" className="size-4" />كشف الحساب</Link></td>
                     </tr>
                   ))}
                 </tbody>
@@ -139,8 +147,8 @@ export function Cashbox() {
             <ul className="flex flex-col">
               {entries.data?.filter((e) => e.status !== 'PENDING').slice(0, 25).map((e) => (
                 <li key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line py-2.5 last:border-0">
-                  <span className="min-w-14 font-semibold tabular-nums">{e.no}</span>
-                  <span className="min-w-0 flex-1"><strong>{KIND_AR[e.kind]}</strong> {e.description}{e.party ? ` · ${e.party}` : ''} <span className="text-sm text-muted">· {e.fund} · {formatDateTime(e.createdAt)}</span></span>
+                  <button type="button" className="min-w-14 text-start font-semibold text-brand-strong underline tabular-nums" onClick={() => setVoucher(e.id)}>{e.no}</button>
+                  <span className="min-w-0 flex-1"><strong>{KIND_AR[e.kind]}</strong> {e.description}{e.party ? ` · ${e.party}` : ''} <span className="text-sm text-muted">· {e.fund}{e.category ? ` · ${categoryLabel(e.category)}` : ''} · {formatDateTime(e.createdAt)}</span></span>
                   <strong className="tabular-nums">{formatNumber(e.amount)}</strong>
                   {e.status === 'REJECTED' ? <Badge tone="danger">مرفوض</Badge> : e.reversed ? <Badge>معكوس</Badge>
                     : canBook && (e.kind === 'RECEIPT' || e.kind === 'PAYMENT') && <Button variant="ghost" onClick={() => setReversing(e)}>اعكسه</Button>}
@@ -158,6 +166,7 @@ export function Cashbox() {
               <div key={x.fundId + x.userId} className="flex flex-wrap items-center gap-3 border-b border-line pb-2.5 last:border-0">
                 <div className="min-w-0 flex-1"><strong>{x.fullName}</strong><div className="text-sm text-muted">{x.fund}</div></div>
                 <strong className={`tabular-nums ${x.balance < 0 ? 'text-danger' : ''}`}>{formatNumber(x.balance)}</strong>
+                {canBook && <Button variant="ghost" onClick={() => { save.reset(); setF({ ...f, fundId: x.fundId, userId: x.userId, amount: String(Math.max(0, x.balance)), description: '' }); setForm('receive'); }}>استلم منها</Button>}
                 {canBook && <Button variant="secondary" onClick={() => { setClosing(x); setCounted(''); }}>أقفلها</Button>}
               </div>
             ))}
@@ -177,12 +186,18 @@ export function Cashbox() {
         </div>
       </div>
 
-      <Dialog open={form !== null} title={{ receipt: 'سند قبض', payment: 'سند صرف', fund: 'صندوق جديد', custody: 'تسليم عهدة' }[form ?? 'receipt']} onClose={() => { save.reset(); close(); }}>
+      <Dialog open={form !== null} title={{ receipt: 'سند قبض', payment: 'سند صرف', fund: 'صندوق جديد', custody: 'تسليم عهدة', receive: 'استلام من عهدة' }[form ?? 'receipt']} onClose={() => { save.reset(); close(); }}>
         {save.error && <Alert>{save.error.message}</Alert>}
         {form === 'fund' ? (
           <>
             <Field label="اسم الصندوق">{(id) => <Input id={id} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />}</Field>
             <Field label="مقيَّد ببرنامج" hint="المقيَّد لا يُصرف منه إلا في حملات برنامجه">{(id) => <Select id={id} value={f.programId} onChange={(e) => setF({ ...f, programId: e.target.value })}><option value="">غير مقيَّد</option>{programs.data?.filter((p) => p.kind === 'MONEY').map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>}</Field>
+          </>
+        ) : form === 'receive' ? (
+          <>
+            <p>يسلّمك <strong>{custody.data?.find((x) => x.userId === f.userId && x.fundId === f.fundId)?.fullName}</strong> نقداً مما في عهدته من «{s.funds.find((x) => x.id === f.fundId)?.name}»، فيدخل نقد الصندوق ويبقى الباقي عليه. للعجز والزيادة أقفل العهدة بالعدّ.</p>
+            <Field label="المبلغ المستلَم بالدينار" hint={`في عهدته ${formatNumber(custody.data?.find((x) => x.userId === f.userId && x.fundId === f.fundId)?.balance ?? 0)}`}>{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />}</Field>
+            <Field label="ملاحظة (اختيارية)">{(id) => <Input id={id} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />}</Field>
           </>
         ) : (
           <>
@@ -197,7 +212,7 @@ export function Cashbox() {
                 )}
                 {!(form === 'receipt' && f.donorId) && <Field label={form === 'receipt' ? 'من' : 'إلى'}>{(id) => <Input id={id} value={f.party} onChange={(e) => setF({ ...f, party: e.target.value })} />}</Field>}
                 <Field label="البيان">{(id) => <Input id={id} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />}</Field>
-                {form === 'payment' && <Field label="باب الصرف" hint="مشتريات، مصاريف إدارية، نقل…">{(id) => <Input id={id} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} />}</Field>}
+                {form === 'payment' && <Field label="باب الصرف" hint="اختر من المعتاد أو اكتب غيره: به يُجمع تقرير المصارف">{(id) => <><Input id={id} list="spend-categories" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} /><datalist id="spend-categories">{SPEND_CATEGORIES.map((c) => <option key={c} value={c} />)}</datalist></>}</Field>}
               </>
             )}
             {form === 'payment' && <p className="text-sm text-muted">سند الصرف لا يثبت ولا ينقص النقد حتى يعتمده موظف آخر.</p>}
@@ -222,6 +237,7 @@ export function Cashbox() {
           </>
         )}
       </Dialog>
+      <VoucherDialog id={voucher} onClose={() => setVoucher(null)} />
       <ReasonDialog open={deciding !== null} danger={deciding?.approve === false} required={deciding?.approve === false}
         title={deciding?.approve ? 'اعتماد القيد' : 'رفض القيد'} confirmLabel={deciding?.approve ? 'اعتماد القيد' : 'رفض القيد'}
         pending={decide.isPending} error={decide.error?.message} onClose={() => { decide.reset(); setDeciding(null); }} onConfirm={(note) => decide.mutate(note)}>

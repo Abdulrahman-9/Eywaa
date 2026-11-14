@@ -29,7 +29,10 @@ async function setupUsers(roles) {
   const names = {};
   for (const [key, role, fullName] of roles) {
     names[key] = `${key}${RUN}`;
-    await call('/users', admin, { username: names[key], fullName, password: PASSWORD, role });
+    // للمتعهد هاتف لازم: رقم فريد لكل تشغيل.
+    const phone = role === 'DISTRIBUTION_AGENT' ? `077${RUN}${String(Object.keys(names).length).padStart(2, '0')}` : undefined;
+    const made = await call('/users', admin, { username: names[key], fullName, password: PASSWORD, role, phone });
+    if (!made.id) throw new Error(`user create failed: ${JSON.stringify(made)}`);
     tokens[key] = (await call('/auth/login', null, { username: names[key], password: PASSWORD })).token;
   }
   return { tokens, names };

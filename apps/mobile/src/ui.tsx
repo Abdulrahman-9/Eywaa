@@ -55,4 +55,26 @@ export function Screen({ title, onBack, status, children }: { title: string; onB
   );
 }
 
+export const formatNumber = (n: number) => n.toLocaleString('en-US');
+/** أرقام عربية تُكتب من لوحة الهاتف تصير لاتينية، ويُحذف ما سواها. */
+export const digits = (v: string) => v.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g, '');
+const dayTime = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+export const formatDayTime = (iso: string) => dayTime.format(new Date(iso));
+export const formatAgo = (iso: string | null) => {
+  if (!iso) return 'لم يكن';
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  return days <= 0 ? 'اليوم' : days === 1 ? 'أمس' : days === 2 ? 'منذ يومين' : days <= 10 ? `منذ ${days} أيام` : `منذ ${days} يوماً`;
+};
+
+export function TextArea({ label, hint, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; hint?: string }) {
+  const id = useId();
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <label htmlFor={id} className="font-semibold">{label}</label>
+      <textarea id={id} rows={3} {...props} className="w-full min-w-0 rounded-xl border border-line-strong bg-surface px-4 py-3 text-lg" />
+      {hint && <span className="text-sm text-muted">{hint}</span>}
+    </div>
+  );
+}
+
 export const formatTime = (iso: string) => new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso));

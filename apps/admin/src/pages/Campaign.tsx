@@ -7,7 +7,7 @@ import { GRANT_READERS, Grants } from '../components/Grants';
 import { PAYOUT_READERS, Payouts } from '../components/Payouts';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
-import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Skeleton } from '../components/ui';
+import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Skeleton, Select } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
@@ -19,7 +19,7 @@ interface Detail {
   id: string; name: string; status: CampaignStatus; unit: string; program: string; startsOn: string; endsOn: string;
   createdBy: string; decidedBy: string | null; decisionNote: string | null; fundId: string | null; kind: string; selection: Selection;
   totals: { families: number; quantity: number; delivered: number; deliveredQuantity: number; byProxy: number };
-  points: { id: string; name: string; address: string | null; hours: string | null; agentName: string | null; assigned: number; quantity: number; delivered: number; deliveredQuantity: number; lastDelivery: string | null }[];
+  points: { id: string; name: string; address: string | null; hours: string | null; agentName: string | null; leadId: string | null; leadName: string | null; assigned: number; quantity: number; delivered: number; deliveredQuantity: number; lastDelivery: string | null }[];
   recent: { id: string; familyId: string; familyNo: string; receiver: 'HEAD' | 'PROXY'; receiverName: string; quantity: number; deliveredAt: string; mode: 'ONLINE' | 'OFFLINE' | 'TRANSFER'; point: string; by: string; hasProof: boolean }[];
   incidents: { id: string; kind: string; message: string; at: string; point: string | null; by: string; familyNo: string | null; deviceId: string | null }[];
 }
@@ -43,6 +43,12 @@ export function Campaign() {
   const savePlace = useMutation({
     mutationFn: () => api(`/points/${place!.id}`, { method: 'POST', body: { address: place!.address, hours: place!.hours } }),
     onSuccess: () => { toast('حُفظ مكان الحضور'); setPlace(null); queryClient.invalidateQueries({ queryKey: ['campaign', id] }); },
+  });
+  const agents = useQuery({ queryKey: ['agents'], queryFn: () => api<{ id: string; fullName: string }[]>('/agents'), enabled: user?.role === 'ADMIN' || user?.role === 'DISTRIBUTION_MANAGER' });
+  const setLead = useMutation({
+    mutationFn: (v: { pointId: string; agentId: string | null }) => api(`/campaigns/${id}/points/${v.pointId}/lead`, { method: 'POST', body: { agentId: v.agentId } }),
+    onSuccess: (_r, v) => { toast(v.agentId ? 'عُيّن مسؤول النقطة: عوائلها صارت حصته في هذه الحملة' : 'رُفع مسؤول النقطة'); queryClient.invalidateQueries({ queryKey: ['campaign', id] }); },
+    onError: (e) => toast(e.message, 'error'),
   });
   const remind = useMutation({
     mutationFn: () => api<{ reminded: number }>(`/campaigns/${id}/remind`, { method: 'POST' }),
@@ -134,6 +140,12 @@ export function Campaign() {
                       <strong>{p.name}</strong>{p.agentName && <> <Badge tone="info">متعهد</Badge></>}
                       <div className="text-muted">{[p.address, p.hours].filter(Boolean).join(' · ') || 'بلا عنوان ولا ساعات'}</div>
                       {canManage && <button type="button" className="font-semibold text-brand-strong underline" onClick={() => { savePlace.reset(); setPlace({ id: p.id, name: p.name, address: p.address ?? '', hours: p.hours ?? '' }); }}>مكان الحضور</button>}
+                      {!p.agentName && (canManage && !['CLOSED', 'CANCELLED', 'REJECTED'].includes(c.status) && agents.data?.length
+                        ? <label className="mt-1.5 flex items-center gap-2"><span className="text-muted">مسؤولها</span>
+                            <Select aria-label={`مسؤول نقطة ${p.name}`} className="!min-h-9 max-w-48" value={p.leadId ?? ''} disabled={setLead.isPending} onChange={(e) => setLead.mutate({ pointId: p.id, agentId: e.target.value || null })}>
+                              <option value="">موظفو التوزيع</option>{agents.data.map((a) => <option key={a.id} value={a.id}>{a.fullName}</option>)}
+                            </Select></label>
+                        : p.leadName && <div>مسؤولها المتعهد <strong>{p.leadName}</strong></div>)}
                     </td>
                     <td className="p-2 tabular-nums">{formatNumber(p.delivered)} من {formatNumber(p.assigned)}</td>
                     <td className="p-2 tabular-nums">{formatNumber(p.deliveredQuantity)} من {formatNumber(p.quantity)} {c.unit}</td>

@@ -130,7 +130,7 @@ run(async ({ step, shot, newPage }) => {
   await step('صفحة الحملة تعرض ما سُلِّم وما رُفض، وملف العائلة يعرض ما استلمته', async () => {
     await manager.goto(campaignUrl);
     await manager.getByText('ما رُفض وما كُشف (2)').waitFor();
-    await manager.getByText('50%').waitFor();
+    await manager.getByText('50%').first().waitFor();
     await manager.getByText('بصورة').first().waitFor();
     await shot(manager, '20-campaign');
     await manager.getByRole('link', { name: cards[0].familyNo }).first().click();

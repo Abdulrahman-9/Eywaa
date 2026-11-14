@@ -19,3 +19,14 @@ export function age(birthDate: string | null): string {
 }
 
 export const formatBytes = (n: number) => (n < 1024 * 1024 ? `${Math.ceil(n / 1024)} ك.ب` : `${(n / 1024 / 1024).toFixed(1)} م.ب`);
+
+/** كم مضى: «اليوم»، «أمس»، «منذ 5 أيام». */
+export function formatAgo(iso: string | null): string {
+  if (!iso) return 'لم يكن';
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (days <= 0) return 'اليوم';
+  if (days === 1) return 'أمس';
+  if (days === 2) return 'منذ يومين';
+  return days <= 10 ? `منذ ${days} أيام` : `منذ ${days} يوماً`;
+}
+export const formatDays = (n: number) => (n === 0 ? 'اليوم' : n === 1 ? 'يوم واحد' : n === 2 ? 'يومان' : n <= 10 ? `${n} أيام` : `${n} يوماً`);

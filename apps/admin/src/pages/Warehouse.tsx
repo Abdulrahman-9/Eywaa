@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AgentDonations } from '../components/AgentDonations';
 import { useState } from 'react';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
@@ -98,6 +99,7 @@ export function Warehouse() {
   const queryClient = useQueryClient();
   const stock = useQuery({ queryKey: ['stock'], queryFn: () => api<Stock>('/inventory/stock') });
   const moves = useQuery({ queryKey: ['stock-moves'], queryFn: () => api<Move[]>('/inventory/moves') });
+  const donations = useQuery({ queryKey: ['agent-donations', '?kind=IN_KIND&status=REPORTED'], queryFn: () => api<{ id: string }[]>('/agent-donations?kind=IN_KIND&status=REPORTED') });
   const [kind, setKind] = useState<Kind | null>(null);
   const [adding, setAdding] = useState(false);
   const [item, setItem] = useState({ name: '', unit: '' });
@@ -133,6 +135,13 @@ export function Warehouse() {
             <Button onClick={() => setKind('RECEIPT')}>تسجيل وارد</Button>
           </div>
         )} />
+
+      {(donations.data?.length ?? 0) > 0 && (
+        <Card className="flex flex-col gap-2 !border-2 !border-[#C8862A]">
+          <h2 className="text-lg font-bold">تبرعات عينية بلّغ بها المتعهدون وتنتظر الاستلام ({donations.data!.length})</h2>
+          <AgentDonations pendingOnly />
+        </Card>
+      )}
 
       {pending.length > 0 && (
         <Card className="flex flex-col gap-3 !border-2 !border-[#C8862A]">

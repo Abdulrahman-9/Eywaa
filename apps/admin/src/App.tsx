@@ -4,7 +4,11 @@ import { Shell } from './components/Shell';
 import { Card, Skeleton } from './components/ui';
 import { useAuth } from './lib/auth';
 import { NAV, canSee } from './lib/roles';
+import { Agent } from './pages/Agent';
+import { Agents } from './pages/Agents';
 import { Audit } from './pages/Audit';
+import { Boxes } from './pages/Boxes';
+import { FundStatement } from './pages/FundStatement';
 import { Campaign } from './pages/Campaign';
 import { CampaignWizard } from './pages/CampaignWizard';
 import { Campaigns } from './pages/Campaigns';
@@ -39,7 +43,7 @@ function Message({ title, body }: { title: string; body: string }) {
 }
 
 const PAGES: Record<string, () => React.JSX.Element> = {
-  '/': Home, '/families': Families, '/requests': Requests, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/campaigns': Campaigns, '/desk': Desk, '/notify': Notify, '/warehouse': Warehouse, '/cashbox': Cashbox, '/housing': Housing, '/reports': Reports, '/users': Users, '/audit': Audit, '/settings': Settings,
+  '/': Home, '/families': Families, '/requests': Requests, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/campaigns': Campaigns, '/desk': Desk, '/agents': Agents, '/boxes': Boxes, '/notify': Notify, '/warehouse': Warehouse, '/cashbox': Cashbox, '/housing': Housing, '/reports': Reports, '/users': Users, '/audit': Audit, '/settings': Settings,
 };
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 const FORBIDDEN = <Message title="لا صلاحية لك في هذه الصفحة" body="هذه الصفحة ليست من عمل دورك. إن رأيت أنك تحتاجها فراجع مدير النظام." />;
@@ -90,6 +94,8 @@ export function App() {
         <Route path="/campaigns/:id/edit/:step?" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <CampaignWizard /> : FORBIDDEN} />
         <Route path="/campaigns/:id" element={canSee(NAV.find((n) => n.to === '/campaigns')!, user.role) ? <Campaign /> : FORBIDDEN} />
         <Route path="/campaigns/:id/tokens" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <Tokens /> : FORBIDDEN} />
+        <Route path="/agents/:id" element={canSee(NAV.find((n) => n.to === '/agents')!, user.role) ? <Agent /> : FORBIDDEN} />
+        <Route path="/cashbox/funds/:id" element={canSee(NAV.find((n) => n.to === '/cashbox')!, user.role) ? <FundStatement /> : FORBIDDEN} />
         <Route path="/housing/:id" element={canSee(NAV.find((n) => n.to === '/housing')!, user.role) ? <HousingProject /> : FORBIDDEN} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Message title="الصفحة غير موجودة" body="العنوان الذي طلبته لا يقابله شيء في النظام." />} />

@@ -33,14 +33,48 @@ export interface GrantCase {
   clientOpId: string; grantId: string; headName: string; phone?: string; mahalla?: string; membersCount?: number; quantity: number; unit: string; deliveredAt: string;
   sync: 'PENDING' | 'SYNCED' | 'REJECTED'; error?: string; warnings?: string[];
 }
+/** صندوق تبرعات في عهدة المتعهد، كما حُمّل من الخادم. */
+export interface Box { id: string; code: string; location: string; address: string | null; hostName: string | null; fund: string; lastOpenedAt: string | null; lastAmount: number | null; average: number; daysSince: number; stale: boolean; expectedNow: number | null }
+export interface CustodyLine { id: string; no: string; kind: string; pending: boolean; description: string; party: string | null; at: string; fund: string; in: number; out: number; balance: number }
+export interface GoodsTransfer { id: string; kind: string; inbound: boolean; item: string; unit: string; quantity: number; at: string; from: string | null; to: string | null; needsAck: boolean; ack: { ok: boolean; note: string | null } | null }
+/** ما يخص المتعهد كما في الخادم عند آخر مزامنة: ذمته، صناديقه، وما آلت إليه طلباته. */
+export interface AgentInfo {
+  phone: string | null; at: string;
+  custody: { balance: number; funds: { fundId: string; fund: string; balance: number }[]; lines: CustodyLine[] };
+  goods: { warehouseId: string | null; balances: { itemId: string; item: string; unit: string; quantity: number }[]; transfers: GoodsTransfer[] };
+  boxes: Box[];
+  funds: { id: string; name: string; program: string | null }[];
+  requests: {
+    additions: { id: string; no: number; headName: string; status: string; at: string; familyNo: string | null; note: string | null }[];
+    edits: { id: string; familyNo: string; reason: string; status: string; at: string; note: string | null }[];
+  };
+}
+type OpSync = 'PENDING' | 'SYNCED' | 'REJECTED';
+/** فتح صندوق تبرعات: ما عُدّ فيه يدخل ذمة المتعهد. */
+export interface CollectionOp { clientOpId: string; boxId: string; code: string; location: string; amount: number; collectedAt: string; sealNo?: string; note?: string; sync: OpSync; error?: string; entryNo?: string; low?: boolean }
+export interface DonationOp {
+  clientOpId: string; kind: 'CASH' | 'IN_KIND'; donorName: string; donorPhone?: string; purpose?: string; reportedAt: string;
+  amount?: number; fundId?: string; fundName?: string; itemText?: string; quantity?: number; unit?: string;
+  sync: OpSync; error?: string; entryNo?: string; no?: number;
+}
+/** طلب إضافة عائلة (اسم وما تيسّر)، أو طلب تعديل عائلة برقمها. */
+export interface RequestOp {
+  clientOpId: string; kind: 'ADD' | 'EDIT'; createdAt: string; headName?: string; phone?: string; mahalla?: string; membersCount?: number; note?: string; familyNo?: string; reason?: string;
+  sync: OpSync; error?: string; no?: number; already?: boolean;
+}
+/** شهادة المتعهد باستلام ما حُوّل إلى مخزنه، أو بفرق فيه. */
+export interface AckOp { moveId: string; ok: boolean; note?: string; item: string; quantity: number; unit: string; sync: OpSync; error?: string }
 interface Data {
   token: string | null; user: User | null; station: Station | null; deliveries: Delivery[]; registrations: Registration[]; visits: Visit[]; visitReports: VisitReport[];
   assignments: Assignment[]; grants: Grant[]; cases: GrantCase[];
+  agentInfo: AgentInfo | null; collections: CollectionOp[]; donations: DonationOp[]; requests: RequestOp[]; acks: AckOp[];
 }
 
 export interface AppState extends Data { meta: Meta | null; unlocked: boolean; manifest: Manifest | null; online: boolean; syncing: boolean; lastSync: string | null; needLogin: boolean; revoked: boolean }
 
-const EMPTY: Data = { token: null, user: null, station: null, deliveries: [], registrations: [], visits: [], visitReports: [], assignments: [], grants: [], cases: [] };
+const EMPTY: Data = { token: null, user: null, station: null, deliveries: [], registrations: [], visits: [], visitReports: [], assignments: [], grants: [], cases: [], agentInfo: null, collections: [], donations: [], requests: [], acks: [] };
+/** خطأ يردّ به الخادم العملية نفسها (لا انقطاع ولا جلسة منتهية ولا عطل): تُعلَّم مردودة ولا تُعاد. */
+const rejected = (err: unknown): err is ApiError => err instanceof ApiError && !err.offline && err.status !== 401 && err.status < 500;
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 let state: AppState = { ...EMPTY, meta: null, unlocked: false, manifest: null, online: navigator.onLine, syncing: false, lastSync: null, needLogin: false, revoked: false };
 const listeners = new Set<() => void>();
@@ -50,7 +84,7 @@ export const useApp = () => useSyncExternalStore((l) => { listeners.add(l); retu
 
 /** يكتب البيانات إلى الخزنة. لا يُعدّ شيء محفوظاً حتى يعود هذا الوعد. */
 async function save(patch: Partial<Data>) {
-  const next: Data = { token: state.token, user: state.user, station: state.station, deliveries: state.deliveries, registrations: state.registrations, visits: state.visits, visitReports: state.visitReports, assignments: state.assignments, grants: state.grants, cases: state.cases, ...patch };
+  const next: Data = { token: state.token, user: state.user, station: state.station, deliveries: state.deliveries, registrations: state.registrations, visits: state.visits, visitReports: state.visitReports, assignments: state.assignments, grants: state.grants, cases: state.cases, agentInfo: state.agentInfo, collections: state.collections, donations: state.donations, requests: state.requests, acks: state.acks, ...patch };
   await vault.put('data', next);
   set(next);
 }
@@ -148,6 +182,17 @@ export const app = {
     await save({ cases: state.cases.filter((c) => c.clientOpId !== clientOpId) });
   },
 
+  async addCollection(c: CollectionOp) { await save({ collections: [...state.collections, c] }); },
+  async addDonation(d: DonationOp) { await save({ donations: [...state.donations, d] }); },
+  async addRequest(r: RequestOp) { await save({ requests: [...state.requests, r] }); },
+  async addAck(a: AckOp) { await save({ acks: [...state.acks.filter((x) => x.moveId !== a.moveId), a] }); },
+  /** يزيل عملية ردّها الخادم بعد أن رآها صاحبها. */
+  async dropOp(list: 'collections' | 'donations' | 'requests', clientOpId: string) {
+    if (list === 'collections') await save({ collections: state.collections.filter((x) => x.clientOpId !== clientOpId) });
+    else if (list === 'donations') await save({ donations: state.donations.filter((x) => x.clientOpId !== clientOpId) });
+    else await save({ requests: state.requests.filter((x) => x.clientOpId !== clientOpId) });
+  },
+
   async addVisitReport(r: VisitReport) {
     await save({ visitReports: [...state.visitReports, r] });
   },
@@ -240,12 +285,67 @@ export const app = {
         }
         await save({ cases: state.cases.map((x) => (x.clientOpId === k.clientOpId ? { ...x, ...patch } : x)) });
       }
+      for (const x of state.collections.filter((c) => c.sync === 'PENDING')) {
+        let patch: Partial<CollectionOp>;
+        try {
+          const r = await api<{ entryNo: string | null; low: boolean }>(`/boxes/${x.boxId}/collections`, { token, timeoutMs: 30_000, body: { amount: x.amount, collectedAt: x.collectedAt, sealNo: x.sealNo, note: x.note, clientOpId: x.clientOpId } });
+          patch = { sync: 'SYNCED', entryNo: r.entryNo ?? undefined, low: r.low, error: undefined };
+        } catch (err) {
+          if (!rejected(err)) throw err;
+          patch = { sync: 'REJECTED', error: err.message };
+        }
+        await save({ collections: state.collections.map((c) => (c.clientOpId === x.clientOpId ? { ...c, ...patch } : c)) });
+      }
+      for (const x of state.donations.filter((d) => d.sync === 'PENDING')) {
+        let patch: Partial<DonationOp>;
+        try {
+          const body = x.kind === 'CASH'
+            ? { kind: 'CASH', amount: x.amount, fundId: x.fundId }
+            : { kind: 'IN_KIND', itemText: x.itemText, quantity: x.quantity, unit: x.unit };
+          const r = await api<{ no: number; entryNo: string | null }>('/agent-donations', { token, timeoutMs: 30_000, body: { ...body, donorName: x.donorName, donorPhone: x.donorPhone, purpose: x.purpose, reportedAt: x.reportedAt, clientOpId: x.clientOpId } });
+          patch = { sync: 'SYNCED', no: r.no, entryNo: r.entryNo ?? undefined, error: undefined };
+        } catch (err) {
+          if (!rejected(err)) throw err;
+          patch = { sync: 'REJECTED', error: err.message };
+        }
+        await save({ donations: state.donations.map((d) => (d.clientOpId === x.clientOpId ? { ...d, ...patch } : d)) });
+      }
+      for (const x of state.requests.filter((r) => r.sync === 'PENDING')) {
+        let patch: Partial<RequestOp>;
+        try {
+          if (x.kind === 'ADD') {
+            const r = await api<{ no: number }>('/quick-requests', { token, timeoutMs: 30_000, body: { headName: x.headName, phone: x.phone, mahalla: x.mahalla, membersCount: x.membersCount, note: x.note, clientOpId: x.clientOpId } });
+            patch = { sync: 'SYNCED', no: r.no, error: undefined };
+          } else {
+            const r = await api<{ already: boolean }>('/agent/family-requests', { token, timeoutMs: 30_000, body: { familyNo: x.familyNo, reason: x.reason } });
+            patch = { sync: 'SYNCED', already: r.already, error: undefined };
+          }
+        } catch (err) {
+          if (!rejected(err)) throw err;
+          patch = { sync: 'REJECTED', error: err.message };
+        }
+        await save({ requests: state.requests.map((r) => (r.clientOpId === x.clientOpId ? { ...r, ...patch } : r)) });
+      }
+      for (const x of state.acks.filter((a) => a.sync === 'PENDING')) {
+        let patch: Partial<AckOp>;
+        try {
+          await api(`/agent/goods/${x.moveId}/ack`, { token, timeoutMs: 30_000, body: { ok: x.ok, note: x.note } });
+          patch = { sync: 'SYNCED', error: undefined };
+        } catch (err) {
+          if (!rejected(err)) throw err;
+          patch = { sync: 'REJECTED', error: err.message };
+        }
+        await save({ acks: state.acks.map((a) => (a.moveId === x.moveId ? { ...a, ...patch } : a)) });
+      }
       if (state.user?.role === 'DISTRIBUTION_AGENT') {
-        const [assignments, grants] = await Promise.all([
+        const [assignments, grants, agentInfo] = await Promise.all([
           api<Assignment[]>('/agent/assignments', { token, timeoutMs: 30_000 }),
           api<Grant[]>('/agent/grants', { token, timeoutMs: 30_000 }),
+          api<AgentInfo>('/agent/me', { token, timeoutMs: 30_000 }),
         ]);
-        await save({ assignments, grants });
+        // ما وصل الخادم صار في كشفه؛ يبقى على الجهاز آخر ما رُفع ليراه صاحبه، وما لم يُرفع أو رُدّ.
+        const keep = <T extends { sync: OpSync }>(list: T[]) => [...list.filter((x) => x.sync !== 'SYNCED'), ...list.filter((x) => x.sync === 'SYNCED').slice(-30)];
+        await save({ assignments, grants, agentInfo, collections: keep(state.collections), donations: keep(state.donations), requests: keep(state.requests), acks: state.acks.filter((a) => a.sync !== 'SYNCED') });
       }
       if (state.user && REGISTRARS.includes(state.user.role)) {
         const visits = await api<Visit[]>('/reassessments?mine=true', { token, timeoutMs: 30_000 });
@@ -277,4 +377,14 @@ export const app = {
 
 export const pendingCount = (s: AppState) =>
   s.deliveries.filter((d) => d.sync === 'PENDING' || (d.photo === 'PENDING')).length + s.registrations.filter((r) => r.sync === 'PENDING' || (r.sync === 'SYNCED' && r.photos.length > 0)).length
-  + s.visitReports.filter((r) => r.sync === 'PENDING').length + s.cases.filter((c) => c.sync === 'PENDING').length;
+  + s.visitReports.filter((r) => r.sync === 'PENDING').length + s.cases.filter((c) => c.sync === 'PENDING').length
+  + [...s.collections, ...s.donations, ...s.requests, ...s.acks].filter((x) => x.sync === 'PENDING').length;
+
+/** عدد ما ردّه الخادم من عمليات المتعهد. */
+export const rejectedOps = (s: AppState) => [...s.collections, ...s.donations, ...s.requests].filter((x) => x.sync === 'REJECTED').length;
+
+/** ذمة المتعهد النقدية كما يراها هاتفه: ما في دفتر الخادم عند آخر مزامنة، مع ما سجّله ولم يُرفع بعد. */
+export function custodyOf(s: AppState) {
+  const unsent = s.collections.filter((c) => c.sync === 'PENDING').reduce((n, c) => n + c.amount, 0) + s.donations.filter((d) => d.sync === 'PENDING' && d.kind === 'CASH').reduce((n, d) => n + (d.amount ?? 0), 0);
+  return { book: s.agentInfo?.custody.balance ?? 0, unsent, total: (s.agentInfo?.custody.balance ?? 0) + unsent };
+}

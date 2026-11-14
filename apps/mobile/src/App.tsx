@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { app, getState, pendingCount, useApp } from './lib/store';
 import { FirstRun, Relogin, Unlock } from './screens/Auth';
+import { BoxesScreen, Custody, Donate, Requests } from './screens/Agent';
 import { GrantScreen } from './screens/Grant';
 import { Deliver } from './screens/Deliver';
 import { Home, type Route } from './screens/Home';
@@ -47,6 +48,10 @@ export function App() {
     case 'register': return <Register onBack={home} onSaved={() => setRoute('outbox')} />;
     case 'grant': return <GrantScreen onBack={home} />;
     case 'visits': return <Visits onBack={home} />;
+    case 'custody': return <Custody onBack={home} />;
+    case 'boxes': return <BoxesScreen onBack={home} />;
+    case 'donate': return <Donate onBack={home} />;
+    case 'requests': return <Requests onBack={home} />;
     case 'relogin': return <Relogin onClose={home} />;
     default: return <Home go={setRoute} />;
   }

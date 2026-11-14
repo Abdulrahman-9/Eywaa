@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { app, pendingCount, useApp } from '../lib/store';
-import { Button, Notice, Screen, formatTime } from '../ui';
+import { app, custodyOf, pendingCount, rejectedOps, useApp } from '../lib/store';
+import { Button, Notice, Screen, formatNumber, formatTime } from '../ui';
 
-export type Route = 'home' | 'station' | 'deliver' | 'day' | 'register' | 'outbox' | 'relogin' | 'visits' | 'grant';
+export type Route = 'home' | 'station' | 'deliver' | 'day' | 'register' | 'outbox' | 'relogin' | 'visits' | 'grant' | 'custody' | 'boxes' | 'donate' | 'requests';
 const DESK = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR', 'DISTRIBUTION_AGENT'];
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 
@@ -19,7 +19,10 @@ export function Home({ go }: { go: (r: Route) => void }) {
   const s = useApp();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const pending = pendingCount(s);
-  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN').length + s.registrations.filter((r) => r.sync === 'REJECTED').length + s.visitReports.filter((r) => r.sync === 'REJECTED').length + s.cases.filter((c) => c.sync === 'REJECTED').length;
+  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN').length + s.registrations.filter((r) => r.sync === 'REJECTED').length + s.visitReports.filter((r) => r.sync === 'REJECTED').length + s.cases.filter((c) => c.sync === 'REJECTED').length + rejectedOps(s);
+  const custody = custodyOf(s);
+  const unacked = (s.agentInfo?.goods.transfers.filter((t) => t.needsAck && !s.acks.some((a) => a.moveId === t.id)).length ?? 0);
+  const staleBoxes = s.agentInfo?.boxes.filter((b) => b.stale && !s.collections.some((c) => c.boxId === b.id && c.sync === 'PENDING')).length ?? 0;
   const role = s.user?.role ?? '';
   const agent = role === 'DISTRIBUTION_AGENT';
   const [picking, setPicking] = useState(false);
@@ -48,7 +51,7 @@ export function Home({ go }: { go: (r: Route) => void }) {
           <span className="font-semibold">ينتظر الرفع إلى الخادم</span>
           <strong data-testid="pending" className={`text-3xl tabular-nums ${pending ? 'text-warn-ink' : 'text-brand-strong'}`}>{pending}</strong>
         </div>
-        {conflicts > 0 && <button type="button" onClick={() => go(s.cases.some((c) => c.sync === 'REJECTED') ? 'grant' : 'outbox')} className="text-start font-semibold text-danger underline">{conflicts} عملية تحتاج نظرك</button>}
+        {conflicts > 0 && <button type="button" onClick={() => go(s.cases.some((c) => c.sync === 'REJECTED') ? 'grant' : s.collections.some((c) => c.sync === 'REJECTED') ? 'boxes' : s.donations.some((d) => d.sync === 'REJECTED') ? 'donate' : s.requests.some((r) => r.sync === 'REJECTED') ? 'requests' : 'outbox')} className="text-start font-semibold text-danger underline">{conflicts} عملية تحتاج نظرك</button>}
         <Button variant={pending ? 'primary' : 'secondary'} disabled={s.syncing} onClick={() => void sync()}>{s.syncing ? 'جارٍ الرفع…' : 'زامن الآن'}</Button>
       </section>
 
@@ -95,6 +98,20 @@ export function Home({ go }: { go: (r: Route) => void }) {
           })}
           {grants.length === 0 && <p className="text-warn-ink">لا تخويل سارٍ الآن.</p>}
           <Button onClick={() => go('grant')}>{grants.length ? 'اصرف لغير مسجَّل' : 'ما صرفتَه بتخويل'}</Button>
+        </section>
+      )}
+
+      {agent && (
+        <section aria-label="الذمة والتحصيل" className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
+          <div className="flex items-baseline justify-between gap-3"><h2 className="text-lg font-bold">في ذمتك نقداً</h2><strong data-testid="home-custody" className="text-3xl tabular-nums">{formatNumber(custody.total)}</strong></div>
+          {unacked > 0 && <Notice tone="warn">{unacked} تحويل من المخزن ينتظر أن تؤكد استلامه.</Notice>}
+          {staleBoxes > 0 && <Notice tone="warn">{staleBoxes} من صناديقك لم يُفتح منذ أكثر من شهر.</Notice>}
+          <div className="grid grid-cols-2 gap-3">
+            <Button variant={unacked ? 'primary' : 'secondary'} onClick={() => go('custody')}>ذمتي</Button>
+            <Button variant={staleBoxes ? 'primary' : 'secondary'} onClick={() => go('boxes')}>الصناديق ({s.agentInfo?.boxes.length ?? 0})</Button>
+            <Button variant="secondary" onClick={() => go('donate')}>تبرع جديد</Button>
+            <Button variant="secondary" onClick={() => go('requests')}>طلباتي</Button>
+          </div>
         </section>
       )}
 

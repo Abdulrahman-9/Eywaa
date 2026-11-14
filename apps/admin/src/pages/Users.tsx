@@ -13,6 +13,7 @@ interface UserRow {
   username: string;
   fullName: string;
   role: Role;
+  phone: string | null;
   active: boolean;
   createdAt: string;
   totpEnabled: boolean;
@@ -26,12 +27,12 @@ function fieldErrors(err: unknown): Record<string, string> {
 
 function CreateUserDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState({ fullName: '', username: '', password: '', role: 'FIELD_RESEARCHER' as Role });
+  const [form, setForm] = useState({ fullName: '', username: '', password: '', phone: '', role: 'FIELD_RESEARCHER' as Role });
   const create = useMutation({
-    mutationFn: () => api('/users', { method: 'POST', body: form }),
+    mutationFn: () => api('/users', { method: 'POST', body: { ...form, phone: form.phone.trim() || undefined } }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
-      setForm({ fullName: '', username: '', password: '', role: 'FIELD_RESEARCHER' });
+      setForm({ fullName: '', username: '', password: '', phone: '', role: 'FIELD_RESEARCHER' });
       onClose();
     },
   });
@@ -62,6 +63,9 @@ function CreateUserDialog({ open, onClose }: { open: boolean; onClose: () => voi
               {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </Select>
           )}
+        </Field>
+        <Field label={form.role === 'DISTRIBUTION_AGENT' ? 'رقم الهاتف (لازم للمتعهد)' : 'رقم الهاتف (اختياري)'} error={errors.phone} hint={form.role === 'DISTRIBUTION_AGENT' ? 'يظهر للمتبرعين وأصحاب مواقع الصناديق' : undefined}>
+          {(id) => <Input id={id} dir="ltr" inputMode="tel" value={form.phone} onChange={set('phone')} />}
         </Field>
         <div className="flex flex-wrap justify-end gap-3">
           <Button variant="secondary" onClick={() => { create.reset(); onClose(); }}>إلغاء</Button>
@@ -148,7 +152,7 @@ export function Users() {
               ))}
               {users.data?.map((u) => (
                 <tr key={u.id} className="border-b border-line last:border-0">
-                  <td className="px-4 py-3 font-semibold">{u.fullName}</td>
+                  <td className="px-4 py-3 font-semibold">{u.fullName}{u.phone && <div className="text-sm font-normal text-muted" dir="ltr" style={{ textAlign: 'right' }}>{u.phone}</div>}{u.role === 'DISTRIBUTION_AGENT' && !u.phone && <div className="text-sm font-normal text-danger">بلا هاتف: أضفه من ملفه في «المتعهدون»</div>}</td>
                   <td className="px-4 py-3" dir="ltr" style={{ textAlign: 'right' }}>{u.username}</td>
                   <td className="px-4 py-3">
                     {u.id === me?.id ? ROLE_LABEL[u.role] : (

@@ -74,3 +74,11 @@ html {
 @media (prefers-reduced-motion: reduce) {
   .skeleton, .dialog-overlay, .dialog-content, .page-in { animation: none; }
 }
+
+/* طباعة سند أو كشف وحده: كل ما سواه يُخفى. */
+@media print {
+  body.print-solo * { visibility: hidden !important; }
+  body.print-solo .print-sheet, body.print-solo .print-sheet * { visibility: visible !important; }
+  body.print-solo .print-sheet { position: absolute; inset-block-start: 0; inset-inline: 0; margin: 0; padding: 1.5rem; border: 0; box-shadow: none; max-height: none; overflow: visible; }
+  body.print-solo .no-print { display: none !important; }
+}
