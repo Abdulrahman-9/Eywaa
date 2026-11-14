@@ -4,6 +4,9 @@ import { Card, Skeleton } from './components/ui';
 import { useAuth } from './lib/auth';
 import { NAV, canSee } from './lib/roles';
 import { Audit } from './pages/Audit';
+import { Campaign } from './pages/Campaign';
+import { Campaigns } from './pages/Campaigns';
+import { Desk } from './pages/Desk';
 import { Families } from './pages/Families';
 import { Family } from './pages/Family';
 import { Programs } from './pages/Programs';
@@ -13,6 +16,7 @@ import { Scoring } from './pages/Scoring';
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
 import { Settings } from './pages/Settings';
+import { Tokens } from './pages/Tokens';
 import { Users } from './pages/Users';
 
 function Message({ title, body }: { title: string; body: string }) {
@@ -26,7 +30,7 @@ function Message({ title, body }: { title: string; body: string }) {
 }
 
 const PAGES: Record<string, () => React.JSX.Element> = {
-  '/': Home, '/families': Families, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/users': Users, '/audit': Audit, '/settings': Settings,
+  '/': Home, '/families': Families, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/campaigns': Campaigns, '/desk': Desk, '/users': Users, '/audit': Audit, '/settings': Settings,
 };
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 const FORBIDDEN = <Message title="لا صلاحية لك في هذه الصفحة" body="هذه الصفحة ليست من عمل دورك. إن رأيت أنك تحتاجها فراجع مدير النظام." />;
@@ -52,6 +56,8 @@ export function App() {
         })}
         <Route path="/families/new" element={REGISTRARS.includes(user.role) ? <Register /> : FORBIDDEN} />
         <Route path="/families/:id" element={canSee(NAV.find((n) => n.to === '/families')!, user.role) ? <Family /> : FORBIDDEN} />
+        <Route path="/campaigns/:id" element={canSee(NAV.find((n) => n.to === '/campaigns')!, user.role) ? <Campaign /> : FORBIDDEN} />
+        <Route path="/campaigns/:id/tokens" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <Tokens /> : FORBIDDEN} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Message title="الصفحة غير موجودة" body="العنوان الذي طلبته لا يقابله شيء في النظام." />} />
       </Route>

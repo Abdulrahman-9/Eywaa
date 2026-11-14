@@ -65,6 +65,16 @@ const ENT_SQL = `
 
 interface Station { actor: AuthUser; pointId: string; deviceId: string }
 
+/** معرّف الحملة كما يدّعيه رمز لم يصحّ توقيعه. يُستعمل للبلاغ فقط، ولا يوثق به. */
+function claimedCampaign(token: string): string | undefined {
+  try {
+    const c = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')).c;
+    return typeof c === 'string' && /^[0-9a-f-]{36}$/i.test(c) ? c : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 class Refusal extends Error {
   constructor(readonly kind: IncidentKind, readonly row: { id?: string; campaign_id?: string } | null, readonly details: Record<string, unknown>) {
     super(kind);
@@ -304,8 +314,10 @@ export class DistributionService {
   // ---------- التسليم ----------
 
   private async incident(kind: IncidentKind, st: Station, row: { id?: string; campaign_id?: string } | null, details: Record<string, unknown> = {}) {
+    // معرّف الحملة قد يكون ادّعاءً من رمز مزوَّر، فلا يُكتب إلا إن وُجدت حملة به.
     await this.db.query(
-      'insert into delivery_incidents (kind, entitlement_id, campaign_id, point_id, device_id, reported_by, details) values ($1,$2,$3,$4,$5,$6,$7)',
+      `insert into delivery_incidents (kind, entitlement_id, campaign_id, point_id, device_id, reported_by, details)
+       values ($1, $2, (select id from campaigns where id = $3), $4, $5, $6, $7)`,
       [kind, row?.id ?? null, row?.campaign_id ?? null, st.pointId, st.deviceId, st.actor.id, JSON.stringify(details)],
     );
   }
@@ -333,9 +345,10 @@ export class DistributionService {
     const tail = lock ? ' for no key update of e' : '';
     if ('token' in input) {
       const payload = verifyToken(input.token, this.signer.publicKeyB64);
-      if (!payload) this.refuse('BAD_SIGNATURE');
+      // الرمز المزوَّر يُنسب إلى الحملة التي يدّعيها (إن وُجدت) ليراه مديرها في بلاغاتها.
+      if (!payload) this.refuse('BAD_SIGNATURE', { campaign_id: claimedCampaign(input.token) });
       row = (await q.query(`${ENT_SQL} where e.id = $1${tail}`, [payload.e])).rows[0];
-      if (!row || row.campaign_id !== payload.c) this.refuse('BAD_SIGNATURE');
+      if (!row || row.campaign_id !== payload.c) this.refuse('BAD_SIGNATURE', { campaign_id: payload.c });
     } else {
       row = (await q.query(`${ENT_SQL} where e.campaign_id = $1 and f.family_no = $2${tail}`, [input.campaignId, toAsciiDigits(input.familyNo).trim()])).rows[0];
       if (!row || !row.code_hash || row.code_hash !== this.codeHash(input.campaignId, row.family_no, input.code)) {

@@ -32,6 +32,10 @@ export function Family() {
     queryKey: ['family', id, 'entitlements'],
     queryFn: () => api<{ programId: string; name: string; unit: string; eligible: boolean; quantity: number; reasons: string[] }[]>(`/families/${id}/entitlements`),
   });
+  const deliveries = useQuery({
+    queryKey: ['family', id, 'deliveries'],
+    queryFn: () => api<{ entitlementId: string; campaignName: string; quantity: number; unit: string; status: string; deliveredAt: string | null; point: string; receiver: string | null; receiverName: string | null }[]>(`/families/${id}/deliveries`),
+  });
   const changes = useQuery({ queryKey: ['changes', id], queryFn: () => api<ChangeRequest[]>(`/changes?familyId=${id}`) });
 
   const decide = useMutation({
@@ -110,6 +114,23 @@ export function Family() {
               </table>
             </div>
           </Card>
+
+          {deliveries.data && deliveries.data.length > 0 && (
+            <Card className="flex flex-col gap-3">
+              <h2 className="text-lg font-bold">ما استلمته العائلة</h2>
+              <ul className="flex flex-col">
+                {deliveries.data.map((d) => (
+                  <li key={d.entitlementId} className="flex flex-wrap items-center gap-3 border-b border-line py-2.5 last:border-0">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold">{d.quantity} {d.unit} · {d.campaignName}</div>
+                      <div className="text-sm text-muted">{d.status === 'DELIVERED' ? `${d.point} · استلمها ${d.receiver === 'PROXY' ? 'الوكيل' : 'رب الأسرة'} ${d.receiverName}` : `بانتظار الاستلام من ${d.point}`}</div>
+                    </div>
+                    {d.deliveredAt ? <span className="text-sm text-muted">{formatDateTime(d.deliveredAt)}</span> : <Badge tone="warn">لم تستلم بعد</Badge>}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           <Card className="flex flex-col gap-3">
             <h2 className="text-lg font-bold">المرفقات</h2>

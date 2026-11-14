@@ -31,7 +31,7 @@ export function Field({ label, error, hint, children }: { label: string; error?:
 }
 
 const CONTROL = 'min-h-11 w-full rounded-lg border border-line-strong bg-surface px-3 text-ink placeholder:text-muted';
-export const Input = (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} className={`${CONTROL} ${props.className ?? ''}`} />;
+export const Input = ({ ref, ...props }: InputHTMLAttributes<HTMLInputElement> & { ref?: React.Ref<HTMLInputElement> }) => <input ref={ref} {...props} className={`${CONTROL} ${props.className ?? ''}`} />;
 export const Select = (props: SelectHTMLAttributes<HTMLSelectElement>) => <select {...props} className={`${CONTROL} ${props.className ?? ''}`} />;
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {

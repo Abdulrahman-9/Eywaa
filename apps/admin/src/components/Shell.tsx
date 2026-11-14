@@ -16,7 +16,7 @@ export function Shell() {
   const waiting = overview.data ? overview.data.families.pendingApproval + overview.data.openDuplicateFlags + overview.data.pendingChangeRequests : 0;
   return (
     <div className="flex min-h-screen flex-wrap">
-      <nav aria-label="القائمة الرئيسية" className="flex max-w-full flex-[1_1_15rem] flex-col gap-6 bg-nav px-4 py-6 text-nav-ink md:max-w-64">
+      <nav aria-label="القائمة الرئيسية" className="flex max-w-full flex-[1_1_15rem] flex-col gap-6 bg-nav px-4 py-6 text-nav-ink md:max-w-64 print:hidden">
         <div className="flex items-center gap-3 px-2">
           <div aria-hidden="true" className="flex size-10 items-center justify-center rounded-[10px] bg-brand text-white">
             <svg viewBox="0 0 24 24" className="size-6" fill="currentColor"><path d="M12 20.5s-7.5-4.6-7.5-10.4A4.1 4.1 0 0 1 12 7.6a4.1 4.1 0 0 1 7.5 2.5c0 5.8-7.5 10.4-7.5 10.4z" /></svg>
@@ -46,7 +46,7 @@ export function Shell() {
       </nav>
 
       <div className="flex min-w-0 flex-[999_1_35rem] flex-col">
-        <header className="flex flex-wrap items-center justify-end gap-3 border-b border-line bg-surface px-4 py-3 md:px-8">
+        <header className="flex flex-wrap items-center justify-end gap-3 border-b border-line bg-surface px-4 py-3 md:px-8 print:hidden">
           <div className="flex items-center gap-3">
             <div aria-hidden="true" className="flex size-10 items-center justify-center rounded-full bg-brand-soft font-bold text-brand-strong">
               {user.fullName.trim().charAt(0)}

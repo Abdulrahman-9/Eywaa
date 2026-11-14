@@ -50,7 +50,7 @@ export function Attachments({ familyId, canUpload, canDelete }: { familyId: stri
             <Field label="نوع المرفق">
               {(id) => (
                 <Select id={id} value={category} onChange={(e) => setCategory(e.target.value as AttachmentCategory)}>
-                  {Object.entries(ATTACHMENT_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  {Object.entries(ATTACHMENT_CATEGORIES).filter(([k]) => k !== 'DELIVERY_PROOF').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </Select>
               )}
             </Field>
