@@ -44,7 +44,7 @@ async function fillHead(page, name, mother, birth, nid) {
   }
 
   const browser = await chromium.launch();
-  const ctx = (o = {}) => browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, locale: 'ar-IQ', ...o });
+  const ctx = (o = {}) => browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: Number(process.env.DSF ?? 2), locale: 'ar-IQ', ...o });
   const researcher = await (await ctx()).newPage();
   const supervisor = await (await ctx()).newPage();
   const errors = [];

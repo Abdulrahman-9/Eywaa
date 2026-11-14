@@ -51,7 +51,7 @@ async function run(main) {
   const errors = [];
   const browser = await chromium.launch();
   const newPage = async (viewport = { width: 1440, height: 900 }) => {
-    const page = await (await browser.newContext({ viewport, deviceScaleFactor: 2, locale: 'ar-IQ' })).newPage();
+    const page = await (await browser.newContext({ viewport, deviceScaleFactor: Number(process.env.DSF ?? 2), locale: 'ar-IQ' })).newPage();
     page.on('pageerror', (e) => errors.push(e.message));
     pages.push(page);
     return page;

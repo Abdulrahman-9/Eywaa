@@ -41,7 +41,7 @@ async function login(page, username, password) {
   await call(`/families/${widow.id}/approve`, admin, {});
 
   const browser = await chromium.launch();
-  const ctx = () => browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, locale: 'ar-IQ' });
+  const ctx = () => browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: Number(process.env.DSF ?? 2), locale: 'ar-IQ' });
   const adminPage = await (await ctx()).newPage();
   const supPage = await (await ctx()).newPage();
   pages = [adminPage, supPage];

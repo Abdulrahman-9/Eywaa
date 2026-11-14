@@ -26,7 +26,7 @@ async function login(page, username, password) {
 
 (async () => {
   const browser = await chromium.launch();
-  const adminCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, locale: 'ar-IQ' });
+  const adminCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: Number(process.env.DSF ?? 2), locale: 'ar-IQ' });
   const admin = await adminCtx.newPage();
   const errors = [];
   admin.on('pageerror', (e) => errors.push(e.message));
@@ -125,7 +125,7 @@ async function login(page, username, password) {
   });
 
   await step('اللوحة تصلح على عرض الهاتف بلا تمرير أفقي', async () => {
-    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'ar-IQ' });
+    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: Number(process.env.DSF ?? 2), locale: 'ar-IQ' });
     const p = await phone.newPage();
     await login(p, 'admin', ADMIN_PASSWORD);
     await p.getByRole('heading', { name: 'الرئيسية' }).waitFor();
