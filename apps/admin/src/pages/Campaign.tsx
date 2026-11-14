@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { CampaignFamilies } from '../components/CampaignFamilies';
 import { CampaignMonitor } from '../components/CampaignMonitor';
+import { GRANT_READERS, Grants } from '../components/Grants';
 import { PAYOUT_READERS, Payouts } from '../components/Payouts';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
@@ -45,9 +46,9 @@ function describeSelection(s: Selection, unit: string): string[] {
 
 interface Detail {
   id: string; name: string; status: CampaignStatus; unit: string; program: string; startsOn: string; endsOn: string;
-  createdBy: string; decidedBy: string | null; decisionNote: string | null; fundId: string | null; selection: Selection;
+  createdBy: string; decidedBy: string | null; decisionNote: string | null; fundId: string | null; kind: string; selection: Selection;
   totals: { families: number; quantity: number; delivered: number; deliveredQuantity: number; byProxy: number };
-  points: { id: string; name: string; address: string | null; hours: string | null; assigned: number; quantity: number; delivered: number; deliveredQuantity: number; lastDelivery: string | null }[];
+  points: { id: string; name: string; address: string | null; hours: string | null; agentName: string | null; assigned: number; quantity: number; delivered: number; deliveredQuantity: number; lastDelivery: string | null }[];
   recent: { id: string; familyId: string; familyNo: string; receiver: 'HEAD' | 'PROXY'; receiverName: string; quantity: number; deliveredAt: string; mode: 'ONLINE' | 'OFFLINE' | 'TRANSFER'; point: string; by: string; hasProof: boolean }[];
   incidents: { id: string; kind: string; message: string; at: string; point: string | null; by: string; familyNo: string | null; deviceId: string | null }[];
 }
@@ -145,6 +146,8 @@ export function Campaign() {
 
       {['ACTIVE', 'CLOSED'].includes(c.status) && <CampaignMonitor campaignId={id} live={c.status === 'ACTIVE'} canSeeAlerts={!!user && ['ADMIN', 'DISTRIBUTION_MANAGER', 'AUDITOR', 'ACCOUNTANT'].includes(user.role)} />}
 
+      {c.kind !== 'MONEY' && ['ACTIVE', 'CLOSED'].includes(c.status) && user && GRANT_READERS.includes(user.role) && <AgentGrants campaignId={id} active={c.status === 'ACTIVE'} points={c.points} canManage={!!canManage} />}
+
       {c.fundId && ['ACTIVE', 'CLOSED'].includes(c.status) && user && PAYOUT_READERS.includes(user.role) && <Payouts campaignId={id} active={c.status === 'ACTIVE'} />}
 
       <div className="flex flex-wrap items-start gap-5">
@@ -157,7 +160,7 @@ export function Campaign() {
                 {c.points.map((p) => (
                   <tr key={p.id} className="border-b border-line last:border-0">
                     <td className="p-2">
-                      <strong>{p.name}</strong>
+                      <strong>{p.name}</strong>{p.agentName && <> <Badge tone="info">متعهد</Badge></>}
                       <div className="text-muted">{[p.address, p.hours].filter(Boolean).join(' · ') || 'بلا عنوان ولا ساعات'}</div>
                       {canManage && <button type="button" className="font-semibold text-brand-strong underline" onClick={() => { savePlace.reset(); setPlace({ id: p.id, name: p.name, address: p.address ?? '', hours: p.hours ?? '' }); }}>مكان الحضور</button>}
                     </td>
@@ -245,4 +248,11 @@ export function Campaign() {
       </Dialog>
     </>
   );
+}
+
+/** يجلب المتعهدين ليقابل نقاط الحملة بحساباتهم، ثم يعرض التخويلات. */
+function AgentGrants({ campaignId, active, points, canManage }: { campaignId: string; active: boolean; points: Detail['points']; canManage: boolean }) {
+  const all = useQuery({ queryKey: ['agents'], queryFn: () => api<{ id: string; fullName: string; pointId: string | null }[]>('/agents'), enabled: canManage });
+  const here = (all.data ?? []).filter((a) => points.some((p) => p.id === a.pointId)).map((a) => ({ id: a.id, name: a.fullName }));
+  return <Grants campaignId={campaignId} active={active} agents={here} />;
 }

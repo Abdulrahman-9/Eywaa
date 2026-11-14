@@ -39,6 +39,7 @@ export function CampaignNew() {
   const queryClient = useQueryClient();
   const programs = useQuery({ queryKey: ['programs'], queryFn: () => api<Program[]>('/programs') });
   const points = useQuery({ queryKey: ['points'], queryFn: () => api<Point[]>('/points') });
+  const agents = useQuery({ queryKey: ['agents'], queryFn: () => api<{ id: string; fullName: string; pointId: string | null }[]>('/agents') });
   const [form, setForm] = useState({ name: '', programId: '', fundId: '', startsOn: today(), endsOn: inDays(7), pointIds: [] as string[] });
   const [newPoint, setNewPoint] = useState('');
   const [manualOnly, setManualOnly] = useState(false);
@@ -79,6 +80,11 @@ export function CampaignNew() {
   const addPoint = useMutation({
     mutationFn: () => api<Point>('/points', { method: 'POST', body: { name: newPoint.trim() } }),
     onSuccess: (pt) => { setNewPoint(''); setForm((x) => ({ ...x, pointIds: [...x.pointIds, pt.id] })); queryClient.invalidateQueries({ queryKey: ['points'] }); },
+  });
+  /** المتعهد يدخل الحملة بنقطته. إن لم تكن له نقطة أُنشئت باسمه عند أول اختيار. */
+  const pickAgent = useMutation({
+    mutationFn: async (a: { id: string; pointId: string | null }) => a.pointId ?? (await api<Point>(`/agents/${a.id}/point`, { method: 'POST' })).id,
+    onSuccess: (pointId) => { setForm((x) => ({ ...x, pointIds: x.pointIds.includes(pointId) ? x.pointIds.filter((y) => y !== pointId) : [...x.pointIds, pointId] })); queryClient.invalidateQueries({ queryKey: ['agents'] }); queryClient.invalidateQueries({ queryKey: ['points'] }); },
   });
   const create = useMutation({
     mutationFn: () => api<{ id: string }>('/campaigns', { method: 'POST', body: { ...form, fundId: money ? form.fundId : undefined, selection } }),
@@ -133,13 +139,25 @@ export function CampaignNew() {
         <fieldset className="flex flex-col gap-2">
           <legend className="text-sm font-medium">نقاط التوزيع (تُقسَّم العوائل عليها بالتساوي)</legend>
           <div className="flex flex-wrap gap-2">
-            {points.data?.filter((x) => x.active).map((x) => (
+            {points.data?.filter((x) => x.active && !x.agentId).map((x) => (
               <label key={x.id} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line-strong px-3.5">
                 <input type="checkbox" className="size-[18px] accent-brand" checked={form.pointIds.includes(x.id)}
                   onChange={(e) => setForm({ ...form, pointIds: e.target.checked ? [...form.pointIds, x.id] : form.pointIds.filter((y) => y !== x.id) })} />{x.name}
               </label>
             ))}
           </div>
+          {(agents.data?.length ?? 0) > 0 && (
+            <div role="group" aria-label="المتعهدون" className="flex flex-col gap-2">
+              <span className="text-sm font-medium">المتعهدون (لكل متعهد حصة من العوائل يسلّمها بهاتفه، ولا يسلّم لغيرها)</span>
+              <div className="flex flex-wrap gap-2">
+                {agents.data!.map((a) => (
+                  <label key={a.id} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line-strong px-3.5">
+                    <input type="checkbox" className="size-[18px] accent-brand" checked={!!a.pointId && form.pointIds.includes(a.pointId)} disabled={pickAgent.isPending} onChange={() => pickAgent.mutate(a)} />المتعهد {a.fullName}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex max-w-md flex-wrap items-end gap-2">
             <div className="min-w-40 flex-1"><Field label="نقطة جديدة">{(id) => <Input id={id} value={newPoint} onChange={(e) => setNewPoint(e.target.value)} />}</Field></div>
             <Button variant="secondary" disabled={newPoint.trim().length < 2 || addPoint.isPending} onClick={() => addPoint.mutate()}>أضف النقطة</Button>

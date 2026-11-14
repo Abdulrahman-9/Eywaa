@@ -57,6 +57,16 @@ export function App() {
       </div>
     );
   }
+  // المتعهد يعمل من تطبيق الميدان وحده: لا شاشة له في لوحة الإدارة.
+  if (user.role === 'DISTRIBUTION_AGENT') {
+    return (
+      <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6 text-center">
+        <h1 className="text-2xl font-bold">أهلاً {user.fullName}</h1>
+        <p>عمل المتعهد من تطبيق الميدان على الهاتف: حصتك من الحملة، والتسليم، وما خُوّلتَ به.</p>
+        <a href="/m/" className="inline-flex min-h-12 items-center justify-center rounded-lg bg-brand px-4 font-semibold text-white">افتح تطبيق الميدان</a>
+      </div>
+    );
+  }
   return (
     <Routes>
       <Route element={<Shell />}>

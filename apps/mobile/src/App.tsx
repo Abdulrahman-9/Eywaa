@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { app, getState, pendingCount, useApp } from './lib/store';
 import { FirstRun, Relogin, Unlock } from './screens/Auth';
+import { GrantScreen } from './screens/Grant';
 import { Deliver } from './screens/Deliver';
 import { Home, type Route } from './screens/Home';
 import { Day, Outbox } from './screens/Lists';
@@ -40,10 +41,11 @@ export function App() {
   const home = () => setRoute('home');
   switch (route) {
     case 'station': return <StationSetup onBack={home} onReady={home} />;
-    case 'deliver': return s.station && s.manifest ? <Deliver onBack={home} /> : <StationSetup onBack={home} onReady={() => setRoute('deliver')} />;
+    case 'deliver': return s.station && s.manifest ? <Deliver onBack={home} /> : s.user?.role === 'DISTRIBUTION_AGENT' ? <Home go={setRoute} /> : <StationSetup onBack={home} onReady={() => setRoute('deliver')} />;
     case 'day': return <Day onBack={home} />;
     case 'outbox': return <Outbox onBack={home} />;
     case 'register': return <Register onBack={home} onSaved={() => setRoute('outbox')} />;
+    case 'grant': return <GrantScreen onBack={home} />;
     case 'visits': return <Visits onBack={home} />;
     case 'relogin': return <Relogin onClose={home} />;
     default: return <Home go={setRoute} />;

@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { app, pendingCount, useApp } from '../lib/store';
 import { Button, Notice, Screen, formatTime } from '../ui';
 
-export type Route = 'home' | 'station' | 'deliver' | 'day' | 'register' | 'outbox' | 'relogin' | 'visits';
-const DESK = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR'];
+export type Route = 'home' | 'station' | 'deliver' | 'day' | 'register' | 'outbox' | 'relogin' | 'visits' | 'grant';
+const DESK = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR', 'DISTRIBUTION_AGENT'];
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 
 export function OnlineChip() {
@@ -19,8 +19,11 @@ export function Home({ go }: { go: (r: Route) => void }) {
   const s = useApp();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const pending = pendingCount(s);
-  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN').length + s.registrations.filter((r) => r.sync === 'REJECTED').length + s.visitReports.filter((r) => r.sync === 'REJECTED').length;
+  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN').length + s.registrations.filter((r) => r.sync === 'REJECTED').length + s.visitReports.filter((r) => r.sync === 'REJECTED').length + s.cases.filter((c) => c.sync === 'REJECTED').length;
   const role = s.user?.role ?? '';
+  const agent = role === 'DISTRIBUTION_AGENT';
+  const [picking, setPicking] = useState(false);
+  const grants = s.grants.filter((g) => new Date(g.expiresAt).getTime() > Date.now());
   const delivered = s.station ? s.deliveries.filter((d) => d.sync !== 'UNKNOWN').length : 0;
   const remaining = s.manifest ? s.manifest.entries.filter((e) => e.status === 'PENDING' && !s.deliveries.some((d) => d.entitlementId === e.id)).length : 0;
 
@@ -45,14 +48,14 @@ export function Home({ go }: { go: (r: Route) => void }) {
           <span className="font-semibold">ينتظر الرفع إلى الخادم</span>
           <strong data-testid="pending" className={`text-3xl tabular-nums ${pending ? 'text-warn-ink' : 'text-brand-strong'}`}>{pending}</strong>
         </div>
-        {conflicts > 0 && <button type="button" onClick={() => go('outbox')} className="text-start font-semibold text-danger underline">{conflicts} عملية تحتاج نظرك</button>}
+        {conflicts > 0 && <button type="button" onClick={() => go(s.cases.some((c) => c.sync === 'REJECTED') ? 'grant' : 'outbox')} className="text-start font-semibold text-danger underline">{conflicts} عملية تحتاج نظرك</button>}
         <Button variant={pending ? 'primary' : 'secondary'} disabled={s.syncing} onClick={() => void sync()}>{s.syncing ? 'جارٍ الرفع…' : 'زامن الآن'}</Button>
       </section>
 
       {DESK.includes(role) && (
         <section aria-label="التوزيع" className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
           <h2 className="text-lg font-bold">التوزيع</h2>
-          {s.station && s.manifest ? (
+          {s.station && s.manifest && !picking ? (
             <>
               <p><strong>{s.station.campaignName}</strong><br /><span className="text-muted">{s.station.pointName} · الشبّاك {s.station.lane} من {s.station.lanes}</span></p>
               <div className="grid grid-cols-2 gap-3 text-center">
@@ -62,15 +65,36 @@ export function Home({ go }: { go: (r: Route) => void }) {
               <Button onClick={() => go('deliver')}>سلّم</Button>
               <div className="grid grid-cols-2 gap-3">
                 <Button variant="secondary" onClick={() => go('day')}>كشف اليوم</Button>
-                <Button variant="secondary" onClick={() => go('station')}>غيّر الحملة</Button>
+                {agent ? <Button variant="secondary" onClick={() => setPicking(true)}>حصصي</Button> : <Button variant="secondary" onClick={() => go('station')}>غيّر الحملة</Button>}
               </div>
             </>
           ) : (
             <>
-              <p className="text-muted">حمّل بيان الحملة قبل الخروج إلى النقطة، والجهاز متصل.</p>
-              <Button onClick={() => go('station')}>اختر الحملة والنقطة</Button>
+              {agent ? (
+                <>
+                  <p className="text-muted">حصصك من الحملات الجارية. زامن لتتجدد، ثم اختر حصة لتحمّل بيانها والجهاز متصل.</p>
+                  <Assignments onLoaded={() => setPicking(false)} />
+                </>
+              ) : (
+                <>
+                  <p className="text-muted">حمّل بيان الحملة قبل الخروج إلى النقطة، والجهاز متصل.</p>
+                  <Button onClick={() => go('station')}>اختر الحملة والنقطة</Button>
+                </>
+              )}
             </>
           )}
+        </section>
+      )}
+
+      {agent && (grants.length > 0 || s.cases.length > 0) && (
+        <section aria-label="التخويل" className="flex flex-col gap-3 rounded-2xl border-2 border-[#C8862A] bg-warn-soft p-4">
+          <h2 className="text-lg font-bold text-warn-ink">صرف لغير المسجَّلين بتخويل</h2>
+          {grants.map((g) => {
+            const left = g.maxCases - g.used - s.cases.filter((c) => c.grantId === g.id && c.sync === 'PENDING').length;
+            return <p key={g.id}><strong>{g.campaignName}</strong><br />بقي {Math.max(0, left)} من {g.maxCases} · {g.perCase} {g.unit} للحالة · حتى {formatTime(g.expiresAt)}</p>;
+          })}
+          {grants.length === 0 && <p className="text-warn-ink">لا تخويل سارٍ الآن.</p>}
+          <Button onClick={() => go('grant')}>{grants.length ? 'اصرف لغير مسجَّل' : 'ما صرفتَه بتخويل'}</Button>
         </section>
       )}
 
@@ -93,5 +117,30 @@ export function Home({ go }: { go: (r: Route) => void }) {
 
       <button type="button" className="mt-auto min-h-12 font-semibold text-muted underline" onClick={() => app.lock()}>اقفل التطبيق</button>
     </Screen>
+  );
+}
+
+/** حصص المتعهد: يختار واحدة فيُحمَّل بيانها. الشبّاك واحد: حصته له وحده. */
+function Assignments({ onLoaded }: { onLoaded: () => void }) {
+  const s = useApp();
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  if (!s.assignments.length) return <Notice tone="warn">لا حصة لك في حملة جارية. زامن، أو راجع مدير التوزيع.</Notice>;
+  return (
+    <>
+      {error && <Notice>{error}</Notice>}
+      {s.assignments.map((a) => (
+        <Button key={a.campaignId + a.pointId} variant="secondary" disabled={!!busy} className="h-auto min-h-16 flex-col !items-start py-2 text-start"
+          onClick={async () => {
+            setBusy(a.campaignId); setError('');
+            try { await app.loadStation({ campaignId: a.campaignId, pointId: a.pointId, pointName: a.pointName, lane: 1, lanes: 1 }); onLoaded(); }
+            catch (e) { setError(e instanceof Error && e.message === 'لا اتصال بالخادم' ? 'تحميل البيان يحتاج اتصالاً.' : e instanceof Error ? e.message : 'تعذّر التحميل'); }
+            finally { setBusy(''); }
+          }}>
+          <span>{a.campaignName}</span>
+          <span className="text-sm font-normal text-muted">{busy === a.campaignId ? 'يُحمَّل البيان…' : `${a.families} عائلة · ${a.quantity} ${a.unit} · سلّمتَ ${a.delivered}`}</span>
+        </Button>
+      ))}
+    </>
   );
 }

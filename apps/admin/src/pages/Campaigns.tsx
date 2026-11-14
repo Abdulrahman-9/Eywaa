@@ -12,7 +12,7 @@ export const CAMPAIGN_STATUS = {
 } as const;
 export type CampaignStatus = keyof typeof CAMPAIGN_STATUS;
 interface Row { id: string; name: string; status: CampaignStatus; unit: string; startsOn: string; endsOn: string; program: string; closedAt: string | null; families: number; delivered: number; quantity: number }
-export interface Point { id: string; name: string; active: boolean }
+export interface Point { id: string; name: string; active: boolean; agentId: string | null; agentName: string | null }
 
 const GROUPS = {
   ALL: ['الكل', null],

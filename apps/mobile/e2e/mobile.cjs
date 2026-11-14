@@ -55,7 +55,12 @@ async function deliver(page, { token, familyNo, code }, receiver) {
     ['researcher', 'FIELD_RESEARCHER', 'باحث ميداني'], ['supervisor', 'BENEFICIARY_SUPERVISOR', 'مشرف المستفيدين'],
     ['manager', 'DISTRIBUTION_MANAGER', 'مدير التوزيع'], ['distributor', 'DISTRIBUTOR', 'موظف توزيع'],
   ]);
-  for (let i = 0; i < 44; i++) await approvedFamily(tokens, { name: `رب أسرة رقم ${i + 1} للتجربة`, nid: `1970${RUN}${String(i).padStart(2, '0')}` });
+  // أسماء متباينة في كل مقطع: الاسم الرباعي المطابق شبهة تكرار، والأرقام لا تدخل في مقارنة الأسماء.
+  const A = ['ثامر', 'وسام', 'عقيل', 'ضياء', 'بشير', 'فراس', 'ماهر', 'نبيل', 'صفاء', 'جلال', 'قحطان'];
+  const B = ['حميد', 'رحيم', 'ناصر', 'مجيد'];
+  const C = ['لطيف', 'كاطع', 'شنشل', 'سلوم', 'عجيل', 'مطشر', 'جبر'];
+  const D = ['العزاوي', 'الساعدي', 'الزبيدي', 'الحيالي', 'الدراجي'];
+  for (let i = 0; i < 44; i++) await approvedFamily(tokens, { name: `${A[i % 11]} ${B[Math.floor(i / 11)]} ${C[i % 7]} ${D[i % 5]}`, nid: `1970${RUN}${String(i).padStart(2, '0')}` });
   // عائلة لها وكيل مسجَّل.
   const withProxy = await call('/families', tokens.researcher, { tags: ['NEEDY'], housing: 'RENTED', members: [{ relation: 'HEAD', fullName: 'أم حسن فاطمة جبار', gender: 'F', documents: [{ type: 'NATIONAL_CARD', number: `1971${RUN}00` }] }], incomes: [], proxies: [{ fullName: 'حسن علي جبار' }] });
   await call(`/families/${withProxy.id}/approve`, tokens.supervisor, {});

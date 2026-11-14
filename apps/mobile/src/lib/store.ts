@@ -25,11 +25,22 @@ export interface VisitReport {
   clientOpId: string; reassessmentId: string; familyNo: string; headName: string | null; findings: string; outcome: 'NO_CHANGE' | 'CHANGED'; visitedAt: string;
   sync: 'PENDING' | 'SYNCED' | 'REJECTED'; error?: string;
 }
-interface Data { token: string | null; user: User | null; station: Station | null; deliveries: Delivery[]; registrations: Registration[]; visits: Visit[]; visitReports: VisitReport[] }
+/** حصة المتعهد في حملة جارية. */
+export interface Assignment { campaignId: string; campaignName: string; unit: string; pointId: string; pointName: string; families: number; delivered: number; quantity: number }
+/** تخويل سارٍ بالصرف لغير المسجَّلين، كما حُمّل من الخادم. */
+export interface Grant { id: string; campaignId: string; campaignName: string; unit: string; maxCases: number; perCase: number; used: number; expiresAt: string; reason: string }
+export interface GrantCase {
+  clientOpId: string; grantId: string; headName: string; phone?: string; mahalla?: string; membersCount?: number; quantity: number; unit: string; deliveredAt: string;
+  sync: 'PENDING' | 'SYNCED' | 'REJECTED'; error?: string; warnings?: string[];
+}
+interface Data {
+  token: string | null; user: User | null; station: Station | null; deliveries: Delivery[]; registrations: Registration[]; visits: Visit[]; visitReports: VisitReport[];
+  assignments: Assignment[]; grants: Grant[]; cases: GrantCase[];
+}
 
 export interface AppState extends Data { meta: Meta | null; unlocked: boolean; manifest: Manifest | null; online: boolean; syncing: boolean; lastSync: string | null; needLogin: boolean; revoked: boolean }
 
-const EMPTY: Data = { token: null, user: null, station: null, deliveries: [], registrations: [], visits: [], visitReports: [] };
+const EMPTY: Data = { token: null, user: null, station: null, deliveries: [], registrations: [], visits: [], visitReports: [], assignments: [], grants: [], cases: [] };
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 let state: AppState = { ...EMPTY, meta: null, unlocked: false, manifest: null, online: navigator.onLine, syncing: false, lastSync: null, needLogin: false, revoked: false };
 const listeners = new Set<() => void>();
@@ -39,7 +50,7 @@ export const useApp = () => useSyncExternalStore((l) => { listeners.add(l); retu
 
 /** يكتب البيانات إلى الخزنة. لا يُعدّ شيء محفوظاً حتى يعود هذا الوعد. */
 async function save(patch: Partial<Data>) {
-  const next: Data = { token: state.token, user: state.user, station: state.station, deliveries: state.deliveries, registrations: state.registrations, visits: state.visits, visitReports: state.visitReports, ...patch };
+  const next: Data = { token: state.token, user: state.user, station: state.station, deliveries: state.deliveries, registrations: state.registrations, visits: state.visits, visitReports: state.visitReports, assignments: state.assignments, grants: state.grants, cases: state.cases, ...patch };
   await vault.put('data', next);
   set(next);
 }
@@ -130,6 +141,13 @@ export const app = {
     for (const p of r?.photos ?? []) await vault.delBytes(p.key);
   },
 
+  async addCase(c: GrantCase) {
+    await save({ cases: [...state.cases, c] });
+  },
+  async dropCase(clientOpId: string) {
+    await save({ cases: state.cases.filter((c) => c.clientOpId !== clientOpId) });
+  },
+
   async addVisitReport(r: VisitReport) {
     await save({ visitReports: [...state.visitReports, r] });
   },
@@ -211,6 +229,24 @@ export const app = {
         }
         await save({ visitReports: state.visitReports.map((x) => (x.clientOpId === r.clientOpId ? { ...x, ...patch } : x)) });
       }
+      for (const k of state.cases.filter((x) => x.sync === 'PENDING')) {
+        let patch: Partial<GrantCase>;
+        try {
+          const r = await api<{ warnings: string[] }>(`/grants/${k.grantId}/cases`, { token, timeoutMs: 30_000, body: { headName: k.headName, phone: k.phone, mahalla: k.mahalla, membersCount: k.membersCount, deliveredAt: k.deliveredAt, clientOpId: k.clientOpId } });
+          patch = { sync: 'SYNCED', warnings: r.warnings, error: undefined };
+        } catch (err) {
+          if (!(err instanceof ApiError) || err.offline || err.status === 401 || err.status >= 500) throw err;
+          patch = { sync: 'REJECTED', error: err.message };
+        }
+        await save({ cases: state.cases.map((x) => (x.clientOpId === k.clientOpId ? { ...x, ...patch } : x)) });
+      }
+      if (state.user?.role === 'DISTRIBUTION_AGENT') {
+        const [assignments, grants] = await Promise.all([
+          api<Assignment[]>('/agent/assignments', { token, timeoutMs: 30_000 }),
+          api<Grant[]>('/agent/grants', { token, timeoutMs: 30_000 }),
+        ]);
+        await save({ assignments, grants });
+      }
       if (state.user && REGISTRARS.includes(state.user.role)) {
         const visits = await api<Visit[]>('/reassessments?mine=true', { token, timeoutMs: 30_000 });
         await save({ visits: visits.map((v) => ({ id: v.id, familyNo: v.familyNo, headName: v.headName, phone: v.phone, mahalla: v.mahalla, landmark: v.landmark, reason: v.reason, source: v.source })) });
@@ -241,4 +277,4 @@ export const app = {
 
 export const pendingCount = (s: AppState) =>
   s.deliveries.filter((d) => d.sync === 'PENDING' || (d.photo === 'PENDING')).length + s.registrations.filter((r) => r.sync === 'PENDING' || (r.sync === 'SYNCED' && r.photos.length > 0)).length
-  + s.visitReports.filter((r) => r.sync === 'PENDING').length;
+  + s.visitReports.filter((r) => r.sync === 'PENDING').length + s.cases.filter((c) => c.sync === 'PENDING').length;

@@ -1,6 +1,6 @@
 export const ROLES = [
   'ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'DISTRIBUTION_MANAGER',
-  'DISTRIBUTOR', 'STOREKEEPER', 'ACCOUNTANT', 'PROJECT_SUPERVISOR', 'AUDITOR',
+  'DISTRIBUTOR', 'STOREKEEPER', 'ACCOUNTANT', 'PROJECT_SUPERVISOR', 'AUDITOR', 'DISTRIBUTION_AGENT',
 ] as const;
 export type Role = (typeof ROLES)[number];
 
@@ -14,6 +14,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   ACCOUNTANT: 'محاسب',
   PROJECT_SUPERVISOR: 'مشرف المشاريع',
   AUDITOR: 'مدقق',
+  DISTRIBUTION_AGENT: 'متعهد توزيع',
 };
 
 export interface NavItem {
