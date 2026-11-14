@@ -5,6 +5,7 @@
 - الخطة والتحليل: [`docs/PLAN.md`](docs/PLAN.md)
 - خارطة التنفيذ: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - الخادم: [`apps/api`](apps/api) — NestJS و PostgreSQL
+- لوحة الإدارة: [`apps/admin`](apps/admin) — React و Vite و Tailwind
 
 ## تشغيل الخادم
 
@@ -19,6 +20,17 @@ set -a && . ./.env && set +a
 pnpm migrate                # ينشئ الجداول
 pnpm seed                   # ينشئ حساب المدير الأول
 pnpm start
+```
+
+## تشغيل لوحة الإدارة
+
+والخادم يعمل على المنفذ 3000:
+
+```bash
+cd apps/admin
+pnpm dev                    # ثم افتح العنوان الذي يطبعه
+# اختبار القبول في المتصفح (بعد pnpm build && pnpm preview):
+ADMIN_PASSWORD=... node e2e/smoke.cjs
 ```
 
 ## الاختبارات

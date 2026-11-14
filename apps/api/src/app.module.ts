@@ -14,12 +14,13 @@ import { FamiliesController } from './families/families.controller';
 import { FamiliesService } from './families/families.service';
 import { SettingsController } from './settings/settings.controller';
 import { SettingsService } from './settings/settings.service';
+import { StatsController } from './stats/stats.controller';
 import { UsersController } from './users/users.controller';
 
 @Module({
   imports: [DbModule],
   controllers: [
-    AuthController, UsersController, AuditController, SettingsController,
+    AuthController, UsersController, AuditController, SettingsController, StatsController,
     FamiliesController, AttachmentsController, ChangesController,
   ],
   providers: [

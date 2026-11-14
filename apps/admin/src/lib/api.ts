@@ -1,0 +1,44 @@
+const TOKEN_KEY = 'eywaa.token';
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string, public details?: unknown) {
+    super(message);
+  }
+}
+
+export const tokenStore = {
+  // sessionStorage: الجلسة تنتهي بإغلاق التبويب، فلا تبقى مفتوحة على حاسوب مشترك.
+  get: () => {
+    try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+  },
+  set: (t: string | null) => {
+    try { t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY); } catch { /* يعمل بلا تخزين */ }
+  },
+};
+
+let onUnauthorized: () => void = () => {};
+export const setUnauthorizedHandler = (fn: () => void) => { onUnauthorized = fn; };
+
+export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  const token = tokenStore.get();
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      method: init.method ?? 'GET',
+      headers: {
+        ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+    });
+  } catch {
+    throw new ApiError(0, 'تعذّر الاتصال بالخادم. تحقق من الشبكة ثم أعد المحاولة.');
+  }
+  const data = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    if (res.status === 401 && path !== '/auth/login') onUnauthorized();
+    const message = (data && typeof data.message === 'string' && data.message) || 'حدث خطأ غير متوقع';
+    throw new ApiError(res.status, message, data);
+  }
+  return data as T;
+}

@@ -16,6 +16,7 @@ export type Role = (typeof ROLES)[number];
 export interface AuthUser {
   id: string;
   username: string;
+  fullName: string;
   role: Role;
 }
 
@@ -59,7 +60,7 @@ export class AuthGuard implements CanActivate {
 
     // يُقرأ الدور من القاعدة في كل طلب، فتعطيل الحساب أو تغيير دوره يسري فوراً.
     const { rows } = await this.db.query(
-      'select id, username, role from users where id = $1 and active',
+      'select id, username, full_name as "fullName", role from users where id = $1 and active',
       [userId],
     );
     if (!rows[0]) throw new UnauthorizedException('الحساب معطَّل أو غير موجود');

@@ -1,0 +1,61 @@
+@import '@fontsource/ibm-plex-sans-arabic/400.css';
+@import '@fontsource/ibm-plex-sans-arabic/500.css';
+@import '@fontsource/ibm-plex-sans-arabic/600.css';
+@import '@fontsource/ibm-plex-sans-arabic/700.css';
+@import 'tailwindcss';
+
+/* نظام التصميم: الألوان والخط والأقطار. كل الشاشات تأخذ منه. */
+@theme {
+  --font-sans: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --color-ground: #f4f6f3;
+  --color-surface: #ffffff;
+  --color-ink: #16211d;
+  --color-muted: #56635d;
+  --color-line: #dde3de;
+  --color-line-strong: #b9c4bd;
+  --color-brand: #0f6b5c;
+  --color-brand-strong: #0b5548;
+  --color-brand-soft: #e4efea;
+  --color-nav: #10231e;
+  --color-nav-active: #1d3a32;
+  --color-nav-ink: #dce7e2;
+  --color-warm: #d9793b;
+  --color-warn-ink: #7a4a06;
+  --color-warn-soft: #fbeed6;
+  --color-info-ink: #1d4e89;
+  --color-info-soft: #e3edf8;
+  --color-danger: #a12a2a;
+  --color-danger-soft: #fbe6e4;
+}
+
+html {
+  font-family: var(--font-sans);
+  background: var(--color-ground);
+  color: var(--color-ink);
+  line-height: 1.6;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+/* شعار المعونة المتحرك */
+@keyframes aid-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.14); } }
+@keyframes aid-flow {
+  0% { transform: translate(0, 0); opacity: 0; }
+  12% { opacity: 1; }
+  50% { transform: translate(-78px, -14px); }
+  88% { opacity: 1; }
+  100% { transform: translate(-156px, 0); opacity: 0; }
+}
+@keyframes aid-arrive { 0%, 78%, 100% { transform: scale(1); } 89% { transform: scale(1.07); } }
+.aid-heart { transform-box: fill-box; transform-origin: center; animation: aid-pulse 2.4s ease-in-out infinite; }
+.aid-parcel { animation: aid-flow 3.6s ease-in-out infinite; opacity: 0; }
+.aid-home { transform-box: fill-box; transform-origin: center bottom; animation: aid-arrive 3.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .aid-heart, .aid-parcel, .aid-home { animation: none; }
+  .aid-parcel { opacity: 1; }
+}
+@keyframes skeleton { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.skeleton { animation: skeleton 1.4s ease-in-out infinite; background: var(--color-line); border-radius: 6px; }
