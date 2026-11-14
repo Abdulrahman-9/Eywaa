@@ -39,7 +39,7 @@ export function Families() {
     <>
       <PageHeader
         title="العوائل"
-        description="ابحث برقم العائلة أو الاسم أو الهاتف."
+        description="ابحث برقم العائلة أو الاسم أو الهاتف أو رقم الوثيقة."
         action={user && CAN_REGISTER.includes(user.role) && (
           <div className="flex flex-wrap gap-2">
             {user.role !== 'FIELD_RESEARCHER' && (
@@ -53,7 +53,7 @@ export function Families() {
       <Card className="flex flex-wrap items-end gap-3">
         <div className="min-w-64 flex-[2]">
           <Field label="بحث">
-            {(id) => <Input id={id} type="search" placeholder="رقم العائلة أو الاسم أو الهاتف" value={q} onChange={(e) => setQ(e.target.value)} />}
+            {(id) => <Input id={id} type="search" placeholder="رقم العائلة أو الاسم أو الهاتف أو رقم الوثيقة" value={q} onChange={(e) => setQ(e.target.value)} />}
           </Field>
         </div>
         <div className="min-w-40 flex-1">

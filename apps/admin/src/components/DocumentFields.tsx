@@ -14,7 +14,7 @@ export function isDocComplete(d: DocDraft): boolean {
   return !!d.number.trim() && !!d.portfolio?.trim();
 }
 
-interface Lookup { found: boolean; familyId?: string; familyNo?: string; personName?: string }
+interface Lookup { found: boolean; familyId?: string; familyNo?: string; personName?: string; similar?: { familyId: string; familyNo: string; personName: string; book: string; near: boolean }[] }
 
 /** حقول وثيقة الهوية، مع فحص التكرار فور اكتمالها. */
 export function DocumentFields({ value, onChange, onDuplicate, idPrefix }: {
@@ -68,7 +68,21 @@ export function DocumentFields({ value, onChange, onDuplicate, idPrefix }: {
           <Link to={`/families/${hit.familyId}`} className="font-bold underline">افتح السجل القائم</Link>
         </Alert>
       )}
-      {hit && !hit.found && <p className="text-sm font-medium text-brand-strong">الوثيقة غير مسجَّلة من قبل.</p>}
+      {hit && !hit.found && !hit.similar?.length && <p className="text-sm font-medium text-brand-strong">الوثيقة غير مسجَّلة من قبل.</p>}
+      {hit && !hit.found && !!hit.similar?.length && (
+        <Alert tone="warn">
+          <strong>الرقم نفسه مسجَّل {value.type === 'CIVIL_ID' ? 'بسجل آخر' : 'بمحفظة أخرى'}.</strong> قد يكون شخصاً آخر (الرقم يتكرر بين السجلات)، وقد يكون هو نفسه. راجع ما كتبتَ قبل أن تمضي:
+          <ul className="mt-1 flex flex-col gap-0.5 font-normal">
+            {hit.similar.slice(0, 5).map((x) => (
+              <li key={x.familyId + x.book}>
+                {value.type === 'CIVIL_ID' ? 'السجل' : 'المحفظة'} <strong dir="ltr">{x.book}</strong>: «{x.personName}»، <Link to={`/families/${x.familyId}`} className="font-bold underline">العائلة {x.familyNo}</Link>
+                {x.near && <strong> · قريب مما كتبتَ: تحقق من الرقم في الوثيقة</strong>}
+              </li>
+            ))}
+          </ul>
+          إن كان الاسم يشبه اسمه عُلّق السجل عند الحفظ حتى يفصل فيه المشرف.
+        </Alert>
+      )}
     </div>
   );
 }

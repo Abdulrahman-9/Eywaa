@@ -185,7 +185,7 @@ describe('منع التكرار القطعي', () => {
     const hit = await api().post('/api/families/lookup/document').set(as('researcher')).send({ type: 'NATIONAL_CARD', number: no });
     expect(hit.body).toMatchObject({ found: true, familyNo: created.body.familyNo });
     const miss = await api().post('/api/families/lookup/document').set(as('researcher')).send({ type: 'NATIONAL_CARD', number: nationalNo() });
-    expect(miss.body).toEqual({ found: false });
+    expect(miss.body).toEqual({ found: false, similar: [] });
   });
 });
 

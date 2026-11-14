@@ -1,14 +1,14 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
-import { normalizeDocNumber, normalizeName, toAsciiDigits } from '../common/arabic';
+import { canonicalId, editDistance, normalizeDocNumber, normalizeName, toAsciiDigits } from '../common/arabic';
 import { FieldCrypto, mask } from '../common/crypto';
 import { formatFamilyNo } from '../common/family-no';
 import { Db } from '../db/db.module';
 import { ScoringService } from '../scoring/scoring.service';
 import { SettingsService } from '../settings/settings.service';
-import { CreateFamilyInput, DocumentInput, documentKey } from './families.schema';
+import { CreateFamilyInput, DocumentInput, documentKey, documentNumberKey } from './families.schema';
 
 /** حدّ تشابه الاسم الكامل الذي تُرفع عنده شبهة التكرار. */
 const NAME_SIMILARITY = 0.6;
@@ -18,6 +18,8 @@ const MOTHER_SIMILARITY = 0.7;
 /** حدّ الاسم «شبه المطابق» الذي يكفي معه تطابق تاريخ الميلاد باليوم. */
 const NEAR_EXACT_NAME = 0.85;
 const MAX_FLAGS_PER_PERSON = 5;
+/** الرقم نفسه بسجل آخر قرينة قوية بذاتها، فيكفي معها تشابه اسم أدنى مما يُطلب في التشابه العام. */
+const SAME_NUMBER_NAME_SIMILARITY = 0.4;
 
 export interface HardConflict {
   kind: 'DOCUMENT' | 'RATION_CARD';
@@ -29,7 +31,8 @@ export interface HardConflict {
 }
 
 @Injectable()
-export class FamiliesService {
+export class FamiliesService implements OnModuleInit {
+  private readonly log = new Logger('FamiliesService');
   constructor(
     @Inject(Db) private readonly db: Db,
     @Inject(FieldCrypto) private readonly crypto: FieldCrypto,
@@ -42,13 +45,89 @@ export class FamiliesService {
   async insertDocument(c: PoolClient, personId: string, doc: DocumentInput) {
     const d = doc as DocumentInput & { register?: string; page?: string; portfolio?: string };
     await c.query(
-      `insert into person_documents (person_id, type, key_hash, number_enc, register, page, portfolio, issued_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `insert into person_documents (person_id, type, key_hash, number_hash, key_version, number_enc, register, page, portfolio, issued_at)
+       values ($1,$2,$3,$4,2,$5,$6,$7,$8,$9)`,
       [
-        personId, d.type, this.crypto.blindIndex(documentKey(d)), this.crypto.encrypt(d.number),
+        personId, d.type, this.crypto.blindIndex(documentKey(d)), this.crypto.blindIndex(documentNumberKey(d.type, d.number)), this.crypto.encrypt(d.number),
         d.register ?? null, d.page ?? null, d.portfolio ?? null, d.issuedAt ?? null,
       ],
     );
+  }
+
+  /**
+   * عند الإقلاع: الوثائق المحفوظة بالمفتاح القديم (رقم|سجل|صفحة) يُعاد حساب مفتاحها بالجديد (سجل ثم رقم).
+   * يُعاد مرة واحدة لكل وثيقة، ولا يضرّ تكراره.
+   */
+  async onModuleInit() {
+    try {
+      const n = await this.rekeyDocuments();
+      if (n.rekeyed || n.collisions) this.log.log(`أُعيد حساب مفاتيح ${n.rekeyed} وثيقة، منها ${n.collisions} تصادمت مع وثيقة قائمة ورُفعت للمراجعة`);
+    } catch (err) {
+      // قاعدة لم تُرحَّل بعد: لا يمنع الإقلاع.
+      this.log.warn(`تعذّر إعادة حساب مفاتيح الوثائق: ${(err as Error).message}`);
+    }
+  }
+
+  async rekeyDocuments(): Promise<{ rekeyed: number; collisions: number }> {
+    let rekeyed = 0, collisions = 0;
+    for (;;) {
+      const { rows } = await this.db.query(
+        `select d.id, d.person_id, d.type, d.number_enc, d.register, d.page, d.portfolio, p.family_id, f.status
+         from person_documents d join persons p on p.id = d.person_id join families f on f.id = p.family_id where d.key_version < 2 order by d.id limit 500`);
+      if (!rows.length) break;
+      for (const r of rows) {
+        const number = this.crypto.decrypt(r.number_enc);
+        const doc = { type: r.type, number, register: r.register ?? '', page: r.page ?? '', portfolio: r.portfolio ?? '' } as DocumentInput;
+        const rejected = r.status === 'REJECTED';
+        // وثائق السجل المرفوض محرَّرة: مفتاحها يبقى ملحقاً بما يفرده، ولا تدخل مطابقة الرقم.
+        const key = this.crypto.blindIndex(documentKey(doc)) + (rejected ? `:rejected:${r.id}` : '');
+        const numberHash = rejected ? null : this.crypto.blindIndex(documentNumberKey(r.type, number));
+        try {
+          await this.db.query('update person_documents set key_hash = $2, number_hash = $3, key_version = 2 where id = $1', [r.id, key, numberHash]);
+          rekeyed++;
+        } catch (err: any) {
+          if (err.code !== '23505') throw err;
+          // وثيقتان قديمتان صارتا بالمفتاح الجديد واحدة (سجل ورقم واحد، وصفحتان): شخص سُجّل مرتين.
+          // لا يُحذف شيء: تبقى الثانية بمفتاح يفردها، وتُرفع شبهةً يفصل فيها المشرف.
+          const other = (await this.db.query('select d.person_id, p.family_id from person_documents d join persons p on p.id = d.person_id where d.key_hash = $1', [key])).rows[0];
+          await this.db.tx(async (c) => {
+            await c.query('update person_documents set key_hash = $2, number_hash = $3, key_version = 2 where id = $1', [r.id, `${key}:collision:${r.id}`, numberHash]);
+            if (other && other.family_id !== r.family_id) {
+              await c.query(
+                `insert into duplicate_flags (family_id, person_id, matched_person_id, matched_family_id, reason, score) values ($1,$2,$3,$4,$5,0.99)`,
+                [r.family_id, r.person_id, other.person_id, other.family_id, 'الوثيقة نفسها (السجل والرقم) مسجَّلة لشخصين بصفحتين مختلفتين']);
+            }
+          });
+          collisions++;
+        }
+      }
+    }
+    return { rekeyed, collisions };
+  }
+
+  /**
+   * من يحمل الرقم نفسه بسجل (أو محفظة) آخر. ليس تكراراً بذاته: الرقم يتكرر بين السجلات.
+   * يُعاد معه ما يُرجّح أنه الشخص نفسه: تقارب السجلّين كتابةً (خطأ إدخال محتمل)، وتشابه الاسم.
+   */
+  async sameNumberElsewhere(q: { query: Db['query'] }, doc: DocumentInput, opts: { excludeFamilyId?: string; nameNorm?: string } = {}) {
+    if (doc.type === 'NATIONAL_CARD') return [];
+    const mine = canonicalId(doc.type === 'CIVIL_ID' ? doc.register : doc.portfolio);
+    const { rows } = await q.query(
+      `select d.register, d.portfolio, p.id as person_id, p.full_name, p.name_norm, p.mother_norm, p.birth_date, f.id as family_id, f.family_no, f.status,
+              case when $4::text is null then null else similarity(p.name_norm, $4) end as name_score
+       from person_documents d join persons p on p.id = d.person_id join families f on f.id = p.family_id
+       where d.number_hash = $1 and d.key_hash <> $2 and f.status <> 'REJECTED' and ($3::uuid is null or f.id <> $3)
+       order by name_score desc nulls last limit 20`,
+      [this.crypto.blindIndex(documentNumberKey(doc.type, doc.number)), this.crypto.blindIndex(documentKey(doc)), opts.excludeFamilyId ?? null, opts.nameNorm ?? null]);
+    return rows.map((r) => {
+      const theirs = canonicalId((doc.type === 'CIVIL_ID' ? r.register : r.portfolio) ?? '');
+      return {
+        personId: r.person_id as string, familyId: r.family_id as string, familyNo: r.family_no as string, status: r.status as string, personName: r.full_name as string,
+        book: theirs, nameScore: r.name_score === null ? null : Number(r.name_score), motherNorm: r.mother_norm as string | null, birthDate: r.birth_date as Date | null,
+        // حرف واحد مبدَّل أو زائد أو ناقص، أو حرفان متجاوران مقلوبان: «45» و«54»، «112» و«12».
+        bookNear: editDistance(mine, theirs, 1) <= 1,
+      };
+    });
   }
 
   hashDocuments(members: { documents: DocumentInput[] }[]) {
@@ -128,7 +207,7 @@ export class FamiliesService {
           ]);
         }
 
-        const flags = await this.flagSuspectedDuplicates(c, id, input, personIds);
+        const flags = (await this.flagSuspectedDuplicates(c, id, input, personIds)) + (await this.flagSameNumber(c, id, input, personIds));
         if (flags > 0) {
           await c.query("update families set status = 'PENDING_DEDUPE_REVIEW' where id = $1", [id]);
         }
@@ -231,6 +310,42 @@ export class FamiliesService {
           [familyId, personIds[i], r.id, r.family_id, `تشابه الاسم مع تطابق: ${reasons.join('، ')}`, r.score],
         );
         count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * رقم الهوية نفسه بسجل آخر، ومعه قرينة أنه الشخص نفسه: تُرفع شبهة ويُعلَّق السجل.
+   * القرائن: اسم متشابه، أو اسم الأم، أو تاريخ الميلاد. وتقارب السجلّين كتابةً يرفع الدرجة ولا يكفي وحده:
+   * السجلات متتالية الأرقام، فجارُ السجل ليس دليلاً.
+   * الرقم نفسه بلا قرينة لا يُرفع: ذاك هو التكرار المعتاد بين السجلات.
+   */
+  private async flagSameNumber(c: PoolClient, familyId: string, input: CreateFamilyInput, personIds: string[]) {
+    let count = 0;
+    for (let i = 0; i < input.members.length; i++) {
+      const m = input.members[i];
+      const nameNorm = normalizeName(m.fullName);
+      const motherNorm = m.motherName ? normalizeName(m.motherName) : null;
+      for (const doc of m.documents) {
+        if (doc.type === 'NATIONAL_CARD') continue;
+        for (const hit of await this.sameNumberElsewhere(c, doc, { excludeFamilyId: familyId, nameNorm })) {
+          const sameName = (hit.nameScore ?? 0) >= SAME_NUMBER_NAME_SIMILARITY;
+          const sameFirst = nameNorm.split(' ')[0] === (hit.personName ? normalizeName(hit.personName).split(' ')[0] : '');
+          const sameMother = !!motherNorm && !!hit.motherNorm && (motherNorm === hit.motherNorm || editDistance(motherNorm, hit.motherNorm, 1) <= 1);
+          const sameBirth = !!m.birthDate && !!hit.birthDate && new Date(hit.birthDate).toISOString().slice(0, 10) === m.birthDate;
+          // الاسم الأول وحده مع سجل متقارب قرينة أيضاً: «علي» بالرقم نفسه والسجل 45 ثم 54.
+          if (!(sameName || sameMother || sameBirth || (sameFirst && hit.bookNear))) continue;
+          const evidence = [sameName && 'الاسم', !sameName && sameFirst && 'الاسم الأول', sameMother && 'اسم الأم', sameBirth && 'تاريخ الميلاد'].filter(Boolean);
+          const [what, differs, both] = doc.type === 'CIVIL_ID' ? ['السجل', 'مختلف', 'السجلان متقاربان'] : ['المحفظة', 'مختلفة', 'المحفظتان متقاربتان'];
+          const mine = canonicalId(doc.type === 'CIVIL_ID' ? doc.register : doc.portfolio);
+          const score = Math.min(0.99, 0.55 + 0.25 * (hit.nameScore ?? 0) + (hit.bookNear ? 0.12 : 0) + (sameMother ? 0.08 : 0) + (sameBirth ? 0.08 : 0));
+          await c.query(
+            `insert into duplicate_flags (family_id, person_id, matched_person_id, matched_family_id, reason, score) values ($1,$2,$3,$4,$5,$6)`,
+            [familyId, personIds[i], hit.personId, hit.familyId,
+             `${doc.type === 'CIVIL_ID' ? 'رقم الهوية' : 'رقم الشهادة'} نفسه و${what} ${differs} (${mine} هنا، ${hit.book} هناك)، مع تطابق: ${evidence.join('، ')}${hit.bookNear ? `. ${both} كتابةً: يُحتمل خطأ في الإدخال` : ''}`, score]);
+          count++;
+        }
       }
     }
     return count;
@@ -356,12 +471,15 @@ export class FamiliesService {
        from families f left join persons h on h.family_id = f.id and h.relation = 'HEAD'
          left join family_scores sc on sc.family_id = f.id
        where ($1::family_status is null or f.status = $1)
-         and ($2::text is null or f.family_no = $2 or f.phone1 like '%' || $2 or f.phone2 like '%' || $2)
+         and ($2::text is null or f.family_no = $2 or f.phone1 like '%' || $2 or f.phone2 like '%' || $2
+              or exists (select 1 from person_documents d join persons dp on dp.id = d.person_id where dp.family_id = f.id and d.number_hash = any($7::text[])))
          and ($3::text is null or exists (
                select 1 from persons p where p.family_id = f.id and p.name_norm like '%' || $3 || '%'))
          and ($6::text is null or sc.class = $6)
        order by f.created_at desc limit $4 offset $5`,
-      [params.status ?? null, isNumeric ? digits : null, nameNorm, params.limit, params.offset, params.class ?? null],
+      [params.status ?? null, isNumeric ? digits : null, nameNorm, params.limit, params.offset, params.class ?? null,
+       // رقم الوثيقة وحده، بأي نوع كانت: البطاقة الوطنية، أو هوية الأحوال بلا سجلها.
+       isNumeric ? (['NATIONAL_CARD', 'CIVIL_ID', 'NATIONALITY_CERT'] as const).map((t) => this.crypto.blindIndex(documentNumberKey(t, digits))) : null],
     );
     return rows.map((r) => ({
       id: r.id, familyNo: r.family_no, status: r.status, tags: r.tags, phone1: r.phone1,
@@ -378,9 +496,10 @@ export class FamiliesService {
        where d.key_hash = $1`,
       [this.crypto.blindIndex(documentKey(doc))],
     );
-    return rows[0]
-      ? { found: true, familyId: rows[0].id, familyNo: rows[0].family_no, status: rows[0].status, personName: rows[0].full_name }
-      : { found: false };
+    if (rows[0]) return { found: true, familyId: rows[0].id, familyNo: rows[0].family_no, status: rows[0].status, personName: rows[0].full_name, similar: [] };
+    // ليست مسجَّلة بسجلها؛ لكن الرقم نفسه قد يكون مسجَّلاً بسجل آخر: يراه الباحث قبل أن يمضي.
+    const similar = await this.sameNumberElsewhere(this.db, doc);
+    return { found: false, similar: similar.map((x) => ({ familyId: x.familyId, familyNo: x.familyNo, personName: x.personName, book: x.book, near: x.bookNear })) };
   }
 
   async lookupRationCard(number: string) {
@@ -418,7 +537,7 @@ export class FamiliesService {
     if (decision === 'REJECTED') {
       // المرفوض يبقى سجلّه للتاريخ، لكنه لا يحجز الوثائق ولا البطاقة التموينية عن تسجيل لاحق صحيح.
       await c.query(
-        `update person_documents set key_hash = key_hash || ':rejected:' || id::text
+        `update person_documents set number_hash = null, key_hash = key_hash || ':rejected:' || id::text
          where person_id in (select id from persons where family_id = $1)`,
         [id],
       );

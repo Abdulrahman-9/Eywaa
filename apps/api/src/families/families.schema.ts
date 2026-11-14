@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { normalizeDocNumber, normalizeIraqiPhone } from '../common/arabic';
+import { canonicalId, normalizeDocNumber, normalizeIraqiPhone } from '../common/arabic';
 
 export const text = z.string().trim().min(1);
 export const optionalText = z.string().trim().min(1).optional();
@@ -44,16 +44,28 @@ export const documentSchema = z.discriminatedUnion('type', [
 ]);
 export type DocumentInput = z.infer<typeof documentSchema>;
 
-/** المفتاح الذي تُفرض به فرادة الوثيقة في النظام كله. */
+/**
+ * المفتاح الداخلي الذي تُفرض به فرادة الوثيقة في النظام كله. لا يخرج من الخادم؛ يُحفظ منه بصمته وحدها.
+ * - البطاقة الوطنية: رقمها (12 خانة، فريد في البلد).
+ * - هوية الأحوال القديمة: السجل ثم الرقم. الرقم وحده يتكرر بين السجلات، والسجل معه يفرده.
+ *   الصفحة ليست من المفتاح: من كُتبت صفحته خطأً يبقى هو هو.
+ * - شهادة الجنسية: الرقم والمحفظة.
+ * وكل جزء بصورته الموحّدة (canonicalId)، فلا يفرّق بين الكتابتين صفرٌ في الأول ولا رقم هندي.
+ */
 export function documentKey(d: DocumentInput): string {
   switch (d.type) {
     case 'NATIONAL_CARD':
       return `NC:${d.number}`;
     case 'CIVIL_ID':
-      return `CI:${d.number}|${d.register}|${d.page}`;
+      return `CI2:${canonicalId(d.register)}:${canonicalId(d.number)}`;
     case 'NATIONALITY_CERT':
-      return `NT:${d.number}|${d.portfolio}`;
+      return `NT2:${canonicalId(d.portfolio)}:${canonicalId(d.number)}`;
   }
+}
+
+/** مفتاح الرقم وحده، بلا سجل ولا محفظة: للمطابقة حين يختلف السجل أو يُخطأ فيه. ليس مفتاح فرادة. */
+export function documentNumberKey(type: DocumentInput['type'], number: string): string {
+  return `NUM:${type}:${canonicalId(number)}`;
 }
 
 export const memberSchema = z.object({
