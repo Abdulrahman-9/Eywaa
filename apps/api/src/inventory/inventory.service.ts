@@ -79,7 +79,17 @@ export class InventoryService {
     if (input.kind === 'WASTE' && !input.note) throw new BadRequestException('يلزم ذكر سبب التلف');
     // التالف يُخرج مالاً بلا مستلم، فلا يثبت حتى يعتمده موظف آخر.
     const status = input.kind === 'WASTE' ? 'PENDING' : 'POSTED';
-    return this.db.tx(async (c) => {
+    return this.db.tx((c) => this.moveIn(c, input, actor, status)).catch((err) => {
+      if (err.code === '23503') throw new BadRequestException('الصنف أو المخزن أو الحملة غير موجود');
+      throw err;
+    });
+  }
+
+  /** الحركة نفسها داخل معاملة قائمة: يستعملها استلام تبرع عيني بلّغ به متعهد. */
+  async moveIn(c: PoolClient, input: MoveInput, actor: AuthUser, status: 'PENDING' | 'POSTED' = 'POSTED') {
+    const from = input.fromWarehouseId ?? null;
+    const to = input.toWarehouseId ?? null;
+    {
       await c.query('select pg_advisory_xact_lock($1)', [STOCK_LOCK]);
       if (from) {
         const have = await this.balance(c, from, input.itemId);
@@ -92,10 +102,7 @@ export class InventoryService {
       );
       await this.audit.append(c, { actorId: actor.id, action: `stock.${input.kind.toLowerCase()}`, entity: 'stock_move', entityId: rows[0].id, payload: input });
       return { id: rows[0].id as string, status };
-    }).catch((err) => {
-      if (err.code === '23503') throw new BadRequestException('الصنف أو المخزن أو الحملة غير موجود');
-      throw err;
-    });
+    }
   }
 
   /** الجرد: ما عُدَّ يُقابَل بالدفتر، وكل فرق يصير تسوية تنتظر اعتماد موظف آخر. */

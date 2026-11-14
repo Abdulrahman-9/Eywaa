@@ -47,6 +47,13 @@ export class DistributionController {
     return this.dist.agentPoint(id, user);
   }
 
+  @Post('campaigns/:id/points/:pointId/lead')
+  @HttpCode(200)
+  @Roles(...MANAGERS)
+  pointLead(@Param('id', ParseUUIDPipe) id: string, @Param('pointId', ParseUUIDPipe) pointId: string, @Body(new ZodPipe(z.object({ agentId: z.string().uuid().nullable() }))) body: { agentId: string | null }, @CurrentUser() user: AuthUser) {
+    return this.dist.pointLead(id, pointId, body.agentId, user);
+  }
+
   @Get('agent/assignments')
   @Roles('DISTRIBUTION_AGENT')
   assignments(@CurrentUser() user: AuthUser) {

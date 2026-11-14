@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, Qu
 import { z } from 'zod';
 import { AuthUser, CurrentUser, Roles } from '../auth/auth.guard';
 import { ZodPipe } from '../common/zod.pipe';
-import { AccountingService, closeSchema, custodySchema, fundSchema, paymentSchema, receiptSchema } from './accounting.service';
+import { AccountingService, closeSchema, custodySchema, fundSchema, paymentSchema, receiptSchema, receiveSchema, statementSchema } from './accounting.service';
 
 const BOOKS = ['ADMIN', 'ACCOUNTANT'] as const;
 const READERS = ['ADMIN', 'ACCOUNTANT', 'DISTRIBUTION_MANAGER', 'AUDITOR'] as const;
@@ -67,6 +67,31 @@ export class AccountingController {
   @Roles(...READERS)
   custodies() {
     return this.accounting.custodies();
+  }
+
+  /** استلام ذمة جزئي: يدخل النقد الصندوق ويبقى الباقي في ذمة صاحبه. */
+  @Post('custody/receive')
+  @Roles(...BOOKS)
+  receive(@Body(new ZodPipe(receiveSchema)) body: z.infer<typeof receiveSchema>, @CurrentUser() user: AuthUser) {
+    return this.accounting.receiveCustody(body, user);
+  }
+
+  @Get('custody/:userId/statement')
+  @Roles(...READERS)
+  custodyStatement(@Param('userId', ParseUUIDPipe) userId: string) {
+    return this.accounting.custodyStatement(userId);
+  }
+
+  @Get('funds/:id/statement')
+  @Roles(...READERS)
+  fundStatement(@Param('id', ParseUUIDPipe) id: string, @Query(new ZodPipe(statementSchema)) q: z.infer<typeof statementSchema>) {
+    return this.accounting.fundStatement(id, q.from, q.to);
+  }
+
+  @Get('entries/:id')
+  @Roles(...READERS)
+  voucher(@Param('id', ParseUUIDPipe) id: string) {
+    return this.accounting.voucher(id);
   }
 
   @Post('custody/issue')

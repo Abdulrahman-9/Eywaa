@@ -18,7 +18,7 @@ export class QuickController {
   }
 
   @Post('quick-requests')
-  @Roles(...FIELD, 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR')
+  @Roles(...FIELD, 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR', 'DISTRIBUTION_AGENT')
   create(@Body(new ZodPipe(quickSchema)) body: QuickInput, @CurrentUser() user: AuthUser) {
     return this.quick.create(body, user);
   }

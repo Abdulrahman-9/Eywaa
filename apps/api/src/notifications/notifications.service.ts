@@ -231,11 +231,12 @@ export class NotificationsService {
   }
 
   /** رسالة إلى هاتف ليس لعائلة مسجَّلة بعد: دعوة صاحب طلب تسجيل سريع. تمرّ بالطابور نفسه. */
-  async direct(title: string, text: string, phone: string, quickRequestId: string) {
+  async direct(title: string, text: string, phone: string, target: string | { quickRequestId?: string; agentDonationId?: string; boxCollectionId?: string }) {
+    const t = typeof target === 'string' ? { quickRequestId: target } : target;
     const { rows } = await this.db.query("insert into notifications (kind, title, body, audience, status, recipients) values ('MANUAL', $1, $2, '{}', 'SENT', 1) returning id", [title, text]);
     await this.db.query(
-      "insert into messages (notification_id, quick_request_id, phone, text, status, chain, next_attempt_at) values ($1,$2,$3,$4,'QUEUED','{WHATSAPP,SMS}',now())",
-      [rows[0].id, quickRequestId, phone, text]);
+      "insert into messages (notification_id, quick_request_id, agent_donation_id, box_collection_id, phone, text, status, chain, next_attempt_at) values ($1,$2,$3,$4,$5,$6,'QUEUED','{WHATSAPP,SMS}',now())",
+      [rows[0].id, t.quickRequestId ?? null, t.agentDonationId ?? null, t.boxCollectionId ?? null, phone, text]);
     if (!this.channels.current.live) while ((await this.processQueue(50, rows[0].id)) > 0);
     return rows[0].id as string;
   }

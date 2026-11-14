@@ -193,7 +193,8 @@ export class DistributionService {
       `select c.id as campaign_id, c.name, c.unit, c.ends_on, p.id as point_id, p.name as point,
               count(e.id)::int as families, count(e.id) filter (where e.status = 'DELIVERED')::int as delivered, coalesce(sum(e.quantity), 0)::int as quantity
        from distribution_points p join entitlements e on e.point_id = p.id join campaigns c on c.id = e.campaign_id
-       where p.agent_id = $1 and c.status = 'ACTIVE' group by c.id, p.id order by c.created_at desc`, [actor.id]);
+       where c.status = 'ACTIVE' and (p.agent_id = $1 or exists (select 1 from campaign_point_agents a where a.campaign_id = c.id and a.point_id = p.id and a.agent_id = $1))
+       group by c.id, p.id order by c.created_at desc`, [actor.id]);
     return rows.map((r) => ({ campaignId: r.campaign_id, campaignName: r.name, unit: r.unit, endsOn: r.ends_on, pointId: r.point_id, pointName: r.point, families: r.families, delivered: r.delivered, quantity: r.quantity }));
   }
 
@@ -201,11 +202,40 @@ export class DistributionService {
    * المتعهد لا يعمل إلا من نقطته، ولا يسلّم إلا من حصته.
    * الموظف في نقطة ثابتة يسلّم لأي عائلة في الحملة والجهاز متصل؛ والمتعهد لا: عهدته محدودة ومحسوبة عليه.
    */
-  private async agentGuard(actor: AuthUser, pointId: string, entitlementPoint?: string) {
+  private async agentGuard(actor: AuthUser, pointId: string, entitlementPoint?: string, campaignId?: string) {
     if (actor.role !== 'DISTRIBUTION_AGENT') return;
-    const mine = (await this.db.query('select 1 from distribution_points where id = $1 and agent_id = $2', [pointId, actor.id])).rowCount;
+    // نقطته هو، أو نقطة ثابتة جُعل مسؤولها في حملة جارية.
+    const mine = (await this.db.query(
+      `select 1 from distribution_points p where p.id = $1 and (p.agent_id = $2 or exists (
+         select 1 from campaign_point_agents a where a.point_id = p.id and a.agent_id = $2 and ($3::uuid is null or a.campaign_id = $3)))`, [pointId, actor.id, campaignId ?? null])).rowCount;
     if (!mine) throw new ForbiddenException('هذه ليست نقطتك');
     if (entitlementPoint && entitlementPoint !== pointId) throw new ConflictException({ message: 'لا تسلّم: هذه العائلة ليست من حصتك', code: 'NOT_THIS_DEVICE' });
+  }
+
+  /**
+   * مسؤول النقطة في الحملة: متعهد يتولى نقطة ثابتة في حملة بعينها، فعوائلها حصته فيها.
+   * نقطة المتعهد نفسه لا تحتاج مسؤولاً: هو صاحبها.
+   */
+  async pointLead(campaignId: string, pointId: string, agentId: string | null, actor: AuthUser) {
+    await this.db.tx(async (c) => {
+      const camp = (await c.query('select status from campaigns where id = $1 for update', [campaignId])).rows[0];
+      if (!camp) throw new NotFoundException('الحملة غير موجودة');
+      if (['CLOSED', 'CANCELLED', 'REJECTED'].includes(camp.status)) throw new ConflictException('انتهت هذه الحملة');
+      const point = (await c.query('select p.name, p.agent_id, exists (select 1 from entitlements e where e.campaign_id = $1 and e.point_id = p.id) as used from distribution_points p where p.id = $2', [campaignId, pointId])).rows[0];
+      if (!point?.used) throw new BadRequestException('هذه النقطة ليست من نقاط الحملة');
+      if (point.agent_id) throw new ConflictException('هذه نقطة متعهد: هو صاحبها');
+      let name: string | null = null;
+      if (agentId) {
+        const u = (await c.query("select full_name from users where id = $1 and active and role = 'DISTRIBUTION_AGENT'", [agentId])).rows[0];
+        if (!u) throw new BadRequestException('ليس متعهداً عاملاً');
+        name = u.full_name;
+        await c.query('insert into campaign_point_agents (campaign_id, point_id, agent_id) values ($1,$2,$3) on conflict (campaign_id, point_id) do update set agent_id = excluded.agent_id', [campaignId, pointId, agentId]);
+      } else {
+        await c.query('delete from campaign_point_agents where campaign_id = $1 and point_id = $2', [campaignId, pointId]);
+      }
+      await this.audit.append(c, { actorId: actor.id, action: 'campaign.point_lead', entity: 'campaign', entityId: campaignId, payload: { point: point.name, agentId, agent: name } });
+    });
+    return this.detail(campaignId);
   }
 
   /** عنوان النقطة وساعاتها: يُكتبان في دعوة الاستلام ليعرف المدعوّ أين يحضر ومتى. */
@@ -317,6 +347,7 @@ export class DistributionService {
       await c.query('update campaigns set name = $2, program_id = $3, unit = $4, starts_on = $5, ends_on = $6, fund_id = $7, selection = $8 where id = $1',
         [id, input.name, program.id, program.unit, input.startsOn, input.endsOn, input.fundId ?? null, JSON.stringify(selection)]);
       await this.fill(c, id, list, input.pointIds);
+      await c.query('delete from campaign_point_agents where campaign_id = $1 and point_id <> all($2::uuid[])', [id, input.pointIds]);
       await this.audit.append(c, {
         actorId: actor.id, action: 'campaign.update', entity: 'campaign', entityId: id,
         payload: { name: input.name, was: row.name, program: program.name, families: list.length, quantity: list.reduce((s, e) => s + e.quantity, 0), funnel: picked.funnel, selection },
@@ -647,7 +678,10 @@ export class DistributionService {
     if (!c) throw new NotFoundException('الحملة غير موجودة');
     const [points, recent, incidents, proxy] = await Promise.all([
       this.db.query(
-        `select dp.id, dp.name, dp.address, dp.hours, (select full_name from users where id = dp.agent_id) as agent_name, count(e.id)::int as assigned, coalesce(sum(e.quantity), 0)::int as quantity,
+        `select dp.id, dp.name, dp.address, dp.hours, (select full_name from users where id = dp.agent_id) as agent_name,
+                (select a.agent_id from campaign_point_agents a where a.campaign_id = $1 and a.point_id = dp.id) as lead_id,
+                (select u.full_name from campaign_point_agents a join users u on u.id = a.agent_id where a.campaign_id = $1 and a.point_id = dp.id) as lead_name,
+                count(e.id)::int as assigned, coalesce(sum(e.quantity), 0)::int as quantity,
                 count(e.id) filter (where e.status = 'DELIVERED')::int as delivered,
                 coalesce(sum(e.quantity) filter (where e.status = 'DELIVERED'), 0)::int as delivered_quantity,
                 max(e.delivered_at) as last_delivery
@@ -676,7 +710,7 @@ export class DistributionService {
       id: c.id, name: c.name, status: c.status, unit: c.unit, program: c.program, programId: c.program_id as string, startsOn: c.starts_on, endsOn: c.ends_on,
       fundId: c.fund_id as string | null, selection: c.selection, kind: c.kind as string, closedAt: c.closed_at, createdBy: c.created_by_username, createdAt: c.created_at, decidedBy: c.decided_by_username, decidedAt: c.decided_at, decisionNote: c.decision_note,
       totals: { families: sum('assigned'), quantity: sum('quantity'), delivered: sum('delivered'), deliveredQuantity: sum('delivered_quantity'), byProxy: proxy.rows[0].n },
-      points: points.rows.map((r) => ({ id: r.id, name: r.name, address: r.address, hours: r.hours, agentName: r.agent_name as string | null, assigned: r.assigned, quantity: r.quantity, delivered: r.delivered, deliveredQuantity: r.delivered_quantity, lastDelivery: r.last_delivery })),
+      points: points.rows.map((r) => ({ id: r.id, name: r.name, address: r.address, hours: r.hours, agentName: r.agent_name as string | null, leadId: r.lead_id as string | null, leadName: r.lead_name as string | null, assigned: r.assigned, quantity: r.quantity, delivered: r.delivered, deliveredQuantity: r.delivered_quantity, lastDelivery: r.last_delivery })),
       recent: recent.rows.map((r) => ({ id: r.id, familyId: r.family_id, familyNo: r.family_no, receiver: r.receiver, receiverName: r.receiver_name, quantity: r.quantity, deliveredAt: r.delivered_at, mode: r.mode, point: r.point, by: r.username, hasProof: r.has_proof })),
       incidents: incidents.rows.map((r) => ({ id: r.id, kind: r.kind, message: MESSAGES[r.kind as IncidentKind], at: r.at, details: r.details, deviceId: r.device_id, point: r.point, by: r.username, familyNo: r.family_no })),
     };
@@ -771,7 +805,7 @@ export class DistributionService {
 
   /** بيان الحملة لجهاز يعمل دون اتصال: استحقاقات نقطته وشبّاكه فقط. */
   async manifest(id: string, pointId: string, lane: number, lanes: number, actor?: AuthUser): Promise<Manifest & { campaignName: string; unit: string }> {
-    if (actor) await this.agentGuard(actor, pointId);
+    if (actor) await this.agentGuard(actor, pointId, undefined, id);
     if (!(lanes >= 1 && lanes <= 50 && lane >= 1 && lane <= lanes)) throw new BadRequestException('رقم الشبّاك غير صالح');
     const { rows } = await this.db.query(`${ENT_SQL} where e.campaign_id = $1 and e.point_id = $2 and c.status = 'ACTIVE' order by e.serial`, [id, pointId]);
     const camp = await this.db.query("select name, unit, ends_on from campaigns where id = $1 and status = 'ACTIVE'", [id]);
@@ -859,7 +893,7 @@ export class DistributionService {
   async check(input: CheckInput, actor: AuthUser) {
     const st = { actor, pointId: input.pointId, deviceId: input.deviceId };
     const row = await this.guarded(st, () => this.locate(this.db, input.locate, false));
-    await this.agentGuard(actor, input.pointId, row.point_id);
+    await this.agentGuard(actor, input.pointId, row.point_id, row.campaign_id);
     return {
       entitlementId: row.id, familyId: row.family_id, familyNo: row.family_no, headName: row.head_name, quantity: row.quantity, unit: row.unit,
       campaignId: row.campaign_id, campaignName: row.campaign_name, assignedPoint: row.assigned_point_name, atAssignedPoint: row.point_id === input.pointId,
@@ -887,7 +921,7 @@ export class DistributionService {
 
     const id = await this.guarded(st, () => this.db.tx(async (c) => {
       const row = await this.locate(c, input.locate, true);
-      await this.agentGuard(actor, input.pointId, row.point_id);
+      await this.agentGuard(actor, input.pointId, row.point_id, row.campaign_id);
       let receiverName: string = row.head_name;
       if (input.receiver.kind === 'PROXY') {
         const p = await c.query('select full_name from proxies where id = $1 and family_id = $2 and active', [input.receiver.proxyId, row.family_id]);

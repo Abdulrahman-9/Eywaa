@@ -12,6 +12,8 @@ export const receiptSchema = z.object({ fundId: z.string().uuid(), amount, party
   .refine((r) => r.party || r.donorId, 'يلزم ذكر من قُبض منه');
 export const paymentSchema = z.object({ fundId: z.string().uuid(), amount, party: text, description: text, category: z.string().trim().min(2).max(60) });
 export const custodySchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid(), amount });
+export const receiveSchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid(), amount, note: z.string().trim().max(200).optional() });
+export const statementSchema = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
 export const closeSchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid().optional(), counted: z.number().int().min(0).max(1_000_000_000_000) });
 
 type Kind = 'RECEIPT' | 'PAYMENT' | 'CUSTODY_ISSUE' | 'CUSTODY_RETURN' | 'DISBURSEMENT' | 'SHORTAGE' | 'OVERAGE' | 'REVERSAL';
@@ -230,6 +232,114 @@ export class AccountingService {
       await this.audit.append(c, { actorId: actor.id, action: 'custody.close', entity: 'fund', entityId: input.fundId, payload: { userId, book, counted: input.counted, difference: diff } });
       return { book, counted: input.counted, difference: diff, pendingEntry: pending };
     });
+  }
+
+  /**
+   * مال تسلّمه موظف في الميدان (تحصيل صندوق تبرعات، أو تبرع نقدي): إيراد للصندوق يدخل ذمته.
+   * يُقيَّد بقوله هو: من سجّل على نفسه مالاً صار مطلوباً به، فلا مصلحة له في الزيادة؛ والنقص يكشفه إشعار المتبرع وعدّ الصندوق.
+   * يُستدعى داخل معاملة العملية التي أنشأته.
+   */
+  async collect(c: PoolClient, p: { fundId: string; amount: number; holderId: string | null; description: string; party?: string | null; donorId?: string | null; category: string; actorId: string }) {
+    await c.query('select pg_advisory_xact_lock($1)', [LEDGER_LOCK]);
+    await this.fund(c, p.fundId);
+    const e = await this.insert(c, { kind: 'RECEIPT', status: 'POSTED', fundId: p.fundId, amount: p.amount, description: p.description, party: p.party ?? null, category: p.category, custodyUser: p.holderId, debit: p.holderId ? custodyAccount(p.holderId) : 'CASH', credit: 'INCOME', actorId: p.actorId });
+    if (p.donorId) await c.query('update ledger_entries set donor_id = $2 where id = $1', [e.id, p.donorId]);
+    return e;
+  }
+
+  /**
+   * استلام ذمة: يسلّم الموظف نقداً مما في ذمته فيدخل نقد الصندوق. جزئي: يبقى الباقي في ذمته.
+   * لا يُستلم أكثر مما في الدفتر؛ الزيادة والعجز يُسوَّيان بإقفال الذمة.
+   */
+  receiveCustody(input: z.infer<typeof receiveSchema>, actor: AuthUser) {
+    if (input.userId === actor.id) throw new ForbiddenException('لا يستلم الموظف ذمة نفسه');
+    return this.locked(async (c) => {
+      await this.fund(c, input.fundId);
+      const holder = (await c.query('select full_name from users where id = $1', [input.userId])).rows[0];
+      if (!holder) throw new BadRequestException('الموظف غير موجود');
+      const book = await this.balanceOf(c, input.fundId, custodyAccount(input.userId));
+      if (input.amount > book) throw new ConflictException(`في ذمته ${book.toLocaleString('en-US')} والمستلَم ${input.amount.toLocaleString('en-US')}. إن زاد النقد عن الدفتر فأقفل الذمة بالعدّ.`);
+      const e = await this.insert(c, { kind: 'CUSTODY_RETURN', status: 'POSTED', fundId: input.fundId, amount: input.amount, description: `استلام من ذمة ${holder.full_name}${input.note ? `: ${input.note}` : ''}`, custodyUser: input.userId, debit: 'CASH', credit: custodyAccount(input.userId), actorId: actor.id });
+      await this.audit.append(c, { actorId: actor.id, action: 'custody.receive', entity: 'ledger_entry', entityId: e.id, payload: { ...input, no: e.no, book, remaining: book - input.amount } });
+      return { ...e, book, remaining: book - input.amount };
+    });
+  }
+
+  /** كشف ذمة موظف: كل ما دخلها وخرج منها برصيد جارٍ، في كل الصناديق. */
+  async custodyStatement(userId: string, limit = 200) {
+    const { rows } = await this.db.query(
+      `select e.id, e.no, e.kind, e.status, e.description, e.party, e.created_at, f.id as fund_id, f.name as fund, l.debit, l.credit, u.username as by
+       from ledger_lines l join ledger_entries e on e.id = l.entry_id join funds f on f.id = e.fund_id join users u on u.id = e.created_by
+       where l.account = $1 and e.status in ('POSTED', 'PENDING') order by e.created_at, e.no`, [custodyAccount(userId)]);
+    let balance = 0;
+    const lines = rows.map((r) => {
+      const posted = r.status === 'POSTED';
+      if (posted) balance += Number(r.debit) - Number(r.credit);
+      return { id: r.id, no: r.no, kind: r.kind, pending: !posted, description: r.description, party: r.party, at: r.created_at, fundId: r.fund_id, fund: r.fund, in: Number(r.debit), out: Number(r.credit), balance, by: r.by };
+    });
+    const byFund = new Map<string, { fundId: string; fund: string; balance: number }>();
+    for (const l of lines) {
+      if (l.pending) continue;
+      const f = byFund.get(l.fundId) ?? { fundId: l.fundId, fund: l.fund, balance: 0 };
+      f.balance += l.in - l.out;
+      byFund.set(l.fundId, f);
+    }
+    return { balance, funds: [...byFund.values()].filter((f) => f.balance !== 0), lines: lines.slice(-limit).reverse() };
+  }
+
+  /** كشف حساب الصندوق: حركات نقده برصيد جارٍ، في مدة. ما قبلها رصيد افتتاحي. */
+  async fundStatement(fundId: string, from?: string, to?: string) {
+    const fund = (await this.db.query('select id, name from funds where id = $1', [fundId])).rows[0];
+    if (!fund) throw new NotFoundException('الصندوق غير موجود');
+    const opening = from ? Number((await this.db.query(
+      `select coalesce(sum(l.debit - l.credit), 0)::bigint as b from ledger_lines l join ledger_entries e on e.id = l.entry_id
+       where e.fund_id = $1 and e.status = 'POSTED' and l.account = 'CASH' and e.created_at < $2::date`, [fundId, from])).rows[0].b) : 0;
+    const { rows } = await this.db.query(
+      `select e.id, e.no, e.kind, e.description, e.party, e.category, e.created_at, l.debit, l.credit, u.username as by, du.username as approved_by
+       from ledger_lines l join ledger_entries e on e.id = l.entry_id join users u on u.id = e.created_by left join users du on du.id = e.decided_by
+       where e.fund_id = $1 and e.status = 'POSTED' and l.account = 'CASH'
+         and ($2::date is null or e.created_at >= $2::date) and ($3::date is null or e.created_at < $3::date + 1)
+       order by e.created_at, e.no`, [fundId, from ?? null, to ?? null]);
+    let balance = opening, received = 0, paid = 0;
+    const lines = rows.map((r) => {
+      const i = Number(r.debit), o = Number(r.credit);
+      balance += i - o; received += i; paid += o;
+      return { id: r.id, no: r.no, kind: r.kind, description: r.description, party: r.party, category: r.category, at: r.created_at, in: i, out: o, balance, by: r.by, approvedBy: r.approved_by };
+    });
+    // من أين جاء المال وفيمَ ذهب، في المدة نفسها. الإيراد يُحسب يوم قُيّد ولو كان بعدُ في ذمة محصِّله.
+    const LIVE = "e.status = 'POSTED' and not exists (select 1 from ledger_entries r where r.reverses = e.id and r.status = 'POSTED')";
+    const cats = await this.db.query(
+      `select e.kind, coalesce(e.category, case when e.donor_id is not null then 'DONOR' else 'DIRECT' end) as category, sum(e.amount)::bigint as amount, count(*)::int as n
+       from ledger_entries e where e.fund_id = $1 and e.kind in ('RECEIPT', 'PAYMENT', 'DISBURSEMENT') and ${LIVE}
+         and ($2::date is null or e.created_at >= $2::date) and ($3::date is null or e.created_at < $3::date + 1)
+       group by 1, 2 order by 3 desc`, [fundId, from ?? null, to ?? null]);
+    const custody = Number((await this.db.query(
+      `select coalesce(sum(l.debit - l.credit), 0)::bigint as b from ledger_lines l join ledger_entries e on e.id = l.entry_id
+       where e.fund_id = $1 and e.status = 'POSTED' and l.account like 'CUSTODY:%'`, [fundId])).rows[0].b);
+    const group = (income: boolean) => cats.rows.filter((r) => (r.kind === 'RECEIPT') === income)
+      .reduce((m: { category: string; amount: number; count: number }[], r) => {
+        const cat = r.kind === 'DISBURSEMENT' ? 'DISBURSEMENT' : r.category;
+        const hit = m.find((x) => x.category === cat);
+        if (hit) { hit.amount += Number(r.amount); hit.count += r.n; } else m.push({ category: cat, amount: Number(r.amount), count: r.n });
+        return m;
+      }, []);
+    return { fundId, fund: fund.name as string, from: from ?? null, to: to ?? null, opening, received, paid, closing: balance, custody, income: group(true), spending: group(false), lines };
+  }
+
+  /** سند واحد بكل ما فيه، للطباعة. */
+  async voucher(id: string) {
+    const { rows } = await this.db.query(
+      `select e.*, f.name as fund, u.full_name as created_by_name, du.full_name as decided_by_name, cu.full_name as custody_name, d.name as donor
+       from ledger_entries e join funds f on f.id = e.fund_id join users u on u.id = e.created_by left join users du on du.id = e.decided_by
+         left join users cu on cu.id = e.custody_user left join donors d on d.id = e.donor_id where e.id = $1`, [id]);
+    const e = rows[0];
+    if (!e) throw new NotFoundException('السند غير موجود');
+    const lines = await this.db.query('select account, debit, credit from ledger_lines where entry_id = $1 order by debit desc', [id]);
+    return {
+      id: e.id, no: e.no, kind: e.kind, status: e.status, fund: e.fund, amount: Number(e.amount), description: e.description, party: e.party ?? e.donor, category: e.category,
+      at: e.created_at, createdBy: e.created_by_name, decidedBy: e.decided_by_name, decidedAt: e.decided_at, custodyOf: e.custody_name,
+      lines: lines.rows.map((l) => ({ account: l.account as string, debit: Number(l.debit), credit: Number(l.credit) })),
+    };
   }
 
   async custodies() {
