@@ -43,6 +43,29 @@ const FIELDS: { key: string; field: string; label: string; how: string }[] = [
   { key: 'noIncome', field: 'max', label: 'لا راتب ولا إعانة', how: '' },
 ];
 
+/** ما يغيّره الإصدار المعلّق عن الساري، وأثره في فئات العوائل. */
+function PendingChanges({ active, pending, sim }: { active: Version; pending: Version; sim?: Simulation }) {
+  const weights = FIELDS.filter((f) => pending.criteria[f.key]?.[f.field] !== active.criteria[f.key]?.[f.field])
+    .map((f) => `${f.label}: من ${active.criteria[f.key]?.[f.field] ?? '—'} إلى ${pending.criteria[f.key]?.[f.field] ?? '—'}`);
+  const limits = (['a', 'b', 'c'] as const).filter((k) => pending.thresholds[k] !== active.thresholds[k])
+    .map((k) => `حدّ الفئة ${CLASS_AR[k.toUpperCase()] ?? k}: من ${active.thresholds[k]} إلى ${pending.thresholds[k]}`);
+  const changes = [...weights, ...limits];
+  const moves = sim ? Object.entries(sim.transitions).sort() : [];
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-warn-ink/20 pt-3 text-ink" data-testid="pending-changes">
+      <strong>ما يغيّره عن الساري ({changes.length}):</strong>
+      <ul className="flex list-inside list-disc flex-col gap-1">{changes.map((c) => <li key={c}>{c}</li>)}</ul>
+      {pending.note && <p>بيان مقترحه: {pending.note}</p>}
+      {sim && (
+        <p>
+          <strong>أثره:</strong> من {formatNumber(sim.families)} عائلة معتمدة تتغير فئة <strong>{formatNumber(sim.changed)}</strong>
+          {moves.length > 0 && <>: {moves.map(([key, n]) => { const [from, to] = key.split('>'); return `${formatNumber(n)} من ${CLASS_AR[from]} إلى ${CLASS_AR[to]}`; }).join('، ')}</>}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function Scoring() {
   const { user } = useAuth();
   const toast = useToast();
@@ -60,6 +83,14 @@ export function Scoring() {
   }, [active, criteria]);
 
   const isAdmin = user?.role === 'ADMIN';
+  // من يعتمد إصداراً يرى ما يعتمده: ما تغيّر عن الساري، وكم عائلة ينقل من فئتها. بغير هذا يعتمد رقماً لا يعرف ما وراءه.
+  const waiting = overview.data?.pending ?? null;
+  const pendingSim = useQuery({
+    queryKey: ['scoring-sim-pending', waiting?.version],
+    queryFn: () => api<Simulation>('/scoring/simulate', { method: 'POST', body: { criteria: waiting!.criteria, thresholds: waiting!.thresholds } }),
+    enabled: !!waiting && ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'AUDITOR'].includes(user?.role ?? ''),
+    retry: false,
+  });
   const dirty = !!active && !!criteria && !!thresholds && (JSON.stringify(criteria) !== JSON.stringify(active.criteria) || JSON.stringify(thresholds) !== JSON.stringify(active.thresholds));
   const draftKey = JSON.stringify([criteria, thresholds]);
   const simulation = useQuery({
@@ -104,6 +135,7 @@ export function Scoring() {
                 </>
               )}
           </div>
+          <PendingChanges active={active} pending={pending} sim={pendingSim.data} />
         </Alert>
       )}
 

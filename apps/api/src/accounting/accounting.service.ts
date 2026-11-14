@@ -454,7 +454,8 @@ export class AccountingService {
               exists (select 1 from ledger_entries r where r.reverses = e.id and r.status <> 'REJECTED') as reversed
        from ledger_entries e join funds f on f.id = e.fund_id join users u on u.id = e.created_by left join users du on du.id = e.decided_by
        where ($1::entry_status is null or e.status = $1) and ($2::uuid is null or e.fund_id = $2) and e.kind <> 'DISBURSEMENT'
-       order by e.created_at desc limit 100`,
+       -- ما ينتظر الاعتماد أولاً، مهما قدُم: المعلّق القديم لا يخرج من القائمة بكثرة ما بعده.
+       order by (e.status = 'PENDING') desc, e.created_at desc limit 100`,
       [params.status ?? null, params.fundId ?? null],
     );
     return rows.map((r) => ({ id: r.id, no: r.no, kind: r.kind, status: r.status, amount: Number(r.amount), description: r.description, party: r.party, category: r.category, createdAt: r.created_at, fund: r.fund, createdBy: r.created_by, decidedBy: r.decided_by, reversed: r.reversed }));

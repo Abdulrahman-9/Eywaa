@@ -203,7 +203,8 @@ export class InventoryService {
        from stock_moves m join items i on i.id = m.item_id left join warehouses fw on fw.id = m.from_wh left join warehouses tw on tw.id = m.to_wh
          join users u on u.id = m.created_by left join campaigns c on c.id = m.campaign_id
        where m.kind <> 'ISSUE' and ($1::move_status is null or m.status = $1)
-       order by m.created_at desc limit 100`,
+       -- ما ينتظر الاعتماد أولاً، مهما قدُم: لو رُتّب بالتاريخ وحده لخرج المعلّق القديم من «آخر مئة» فلا يراه من يعتمده.
+       order by (m.status = 'PENDING') desc, m.created_at desc limit 100`,
       [status ?? null],
     );
     return rows.map((r) => ({ id: r.id, kind: r.kind, status: r.status, quantity: r.quantity, expiry: r.expiry, source: r.source, note: r.note, createdAt: r.created_at, item: r.item, unit: r.unit, from: r.from_name, to: r.to_name, by: r.username, campaign: r.campaign }));

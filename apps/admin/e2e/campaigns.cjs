@@ -21,6 +21,7 @@ run(async ({ step, shot, newPage }) => {
   await login(mgr, names.manager);
   const final = (page) => page.getByTestId('final');
   let campaignUrl;
+  let usedCode;
 
   await step('المدير ينشئ برنامج «لحوم الأضاحي» من قالبه', async () => {
     await admin.getByRole('link', { name: 'البرامج' }).click();
@@ -199,6 +200,7 @@ run(async ({ step, shot, newPage }) => {
     const toks = await call(`/campaigns/${id}/tokens`, tokens.manager);
     const point = (await call(`/campaigns/${id}`, tokens.manager)).points[0].id;
     const t = toks.find((x) => x.familyNo === fams[2].familyNo);
+    usedCode = t.code;
     await call('/deliveries/redeem', tokens.distributor, { pointId: point, deviceId: 'desk', locate: { token: t.token }, clientOpId: crypto.randomUUID(), receiver: { kind: 'HEAD' } });
     await mgr.getByLabel('حال الاستلام').selectOption('DELIVERED');
     await mgr.getByText('1–1 من 1').waitFor();
@@ -229,8 +231,8 @@ run(async ({ step, shot, newPage }) => {
     await mgr.getByText('لا شيء يلفت النظر').waitFor();
     const toks = await call(`/campaigns/${id}/tokens`, tokens.manager);
     const point = (await call(`/campaigns/${id}`, tokens.manager)).points[0].id;
-    // الرمز الذي سُلِّم به يُعرض ثلاث مرات أخرى: لم يبقَ في كشف الرموز، فيُؤخذ من رسالة العائلة رمزها الرقمي.
-    const code = /الرمز: (\d{8})/.exec((await call(`/families/${fams[2].id}/messages`, tokens.supervisor)).map((m) => m.text).join(' '))[1];
+    // الرمز الذي سُلِّم به يُعرض ثلاث مرات أخرى. لم يبقَ في كشف الرموز، وسجل رسائل العائلة يحجبه: فيُؤخذ ممّا حُفظ قبل التسليم.
+    const code = usedCode;
     for (let i = 0; i < 3; i++) await call('/deliveries/check', tokens.distributor, { pointId: point, deviceId: 'desk', locate: { campaignId: id, familyNo: fams[2].familyNo, code } });
     await mgr.reload();
     await mgr.locator('[data-alert="REPEATED_TOKEN"]').getByText('رمز مستعمل عُرض 3 مرات').waitFor();
