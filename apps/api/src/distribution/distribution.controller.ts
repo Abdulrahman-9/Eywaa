@@ -13,6 +13,8 @@ const MANAGERS = ['ADMIN', 'DISTRIBUTION_MANAGER'] as const;
 const DESK = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR'] as const;
 const READERS = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR', 'ACCOUNTANT', 'STOREKEEPER', 'AUDITOR'] as const;
 const noteSchema = z.object({ note: z.string().trim().min(1).optional() });
+const place = z.string().trim().max(200).transform((v) => v || null).nullable().optional();
+const pointPatchSchema = z.object({ name: z.string().trim().min(2).max(60).optional(), address: place, hours: place });
 const manifestSchema = z.object({ pointId: z.string().uuid(), lane: z.coerce.number().int().default(1), lanes: z.coerce.number().int().default(1) });
 
 @Controller()
@@ -29,6 +31,20 @@ export class DistributionController {
   @Roles(...MANAGERS)
   createPoint(@Body(new ZodPipe(z.object({ name: z.string().trim().min(2).max(60) }))) body: { name: string }, @CurrentUser() user: AuthUser) {
     return this.dist.createPoint(body.name, user);
+  }
+
+  @Post('points/:id')
+  @HttpCode(200)
+  @Roles(...MANAGERS)
+  updatePoint(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(pointPatchSchema)) body: z.infer<typeof pointPatchSchema>, @CurrentUser() user: AuthUser) {
+    return this.dist.updatePoint(id, body, user);
+  }
+
+  @Post('campaigns/:id/remind')
+  @HttpCode(200)
+  @Roles(...MANAGERS)
+  remind(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.dist.remind(id, user);
   }
 
   @Get('campaigns')

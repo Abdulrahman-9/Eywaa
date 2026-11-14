@@ -96,7 +96,7 @@ export function render(template: string, vars: Record<string, string | number | 
   });
 }
 
-export const VARIABLES = ['الاسم', 'رقم_العائلة', 'النقطة', 'آخر_موعد', 'المقدار', 'الرمز_الرقمي'] as const;
+export const VARIABLES = ['الاسم', 'رقم_العائلة', 'النقطة', 'مكان_الحضور', 'آخر_موعد', 'المقدار', 'الرمز_الرقمي'] as const;
 /** متغيرات في النص لا يعرفها النظام. */
 export function unknownVariables(template: string): string[] {
   const out = new Set<string>();

@@ -5,7 +5,7 @@ import { CampaignFamilies } from '../components/CampaignFamilies';
 import { PAYOUT_READERS, Payouts } from '../components/Payouts';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
-import { Alert, Badge, Button, Card, Dialog, PageHeader, Skeleton } from '../components/ui';
+import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Skeleton } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
@@ -46,7 +46,7 @@ interface Detail {
   id: string; name: string; status: CampaignStatus; unit: string; program: string; startsOn: string; endsOn: string;
   createdBy: string; decidedBy: string | null; decisionNote: string | null; fundId: string | null; selection: Selection;
   totals: { families: number; quantity: number; delivered: number; deliveredQuantity: number; byProxy: number };
-  points: { id: string; name: string; assigned: number; quantity: number; delivered: number; deliveredQuantity: number; lastDelivery: string | null }[];
+  points: { id: string; name: string; address: string | null; hours: string | null; assigned: number; quantity: number; delivered: number; deliveredQuantity: number; lastDelivery: string | null }[];
   recent: { id: string; familyId: string; familyNo: string; receiver: 'HEAD' | 'PROXY'; receiverName: string; quantity: number; deliveredAt: string; mode: 'ONLINE' | 'OFFLINE' | 'TRANSFER'; point: string; by: string; hasProof: boolean }[];
   incidents: { id: string; kind: string; message: string; at: string; point: string | null; by: string; familyNo: string | null; deviceId: string | null }[];
 }
@@ -66,6 +66,16 @@ export function Campaign() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<'approve' | 'reject' | 'cancel' | 'close' | null>(null);
+  const [place, setPlace] = useState<{ id: string; name: string; address: string; hours: string } | null>(null);
+  const savePlace = useMutation({
+    mutationFn: () => api(`/points/${place!.id}`, { method: 'POST', body: { address: place!.address, hours: place!.hours } }),
+    onSuccess: () => { toast('حُفظ مكان الحضور'); setPlace(null); queryClient.invalidateQueries({ queryKey: ['campaign', id] }); },
+  });
+  const remind = useMutation({
+    mutationFn: () => api<{ reminded: number }>(`/campaigns/${id}/remind`, { method: 'POST' }),
+    onSuccess: (r) => toast(`ذُكّرت ${r.reminded} عائلة لم تستلم`),
+    onError: (e) => toast(e.message, 'error'),
+  });
   const q = useQuery({
     queryKey: ['campaign', id],
     queryFn: () => api<Detail>(`/campaigns/${id}`),
@@ -104,7 +114,7 @@ export function Campaign() {
             <Badge tone={CAMPAIGN_STATUS[c.status][1]}>{CAMPAIGN_STATUS[c.status][0]}</Badge>
             {canManage && c.status === 'DRAFT' && <><Button variant="danger" onClick={() => setDialog('cancel')}>إلغاء الحملة</Button><Button disabled={act.isPending} onClick={() => act.mutate({ verb: 'submit' })}>أرسل للاعتماد</Button></>}
             {canManage && c.status === 'PENDING_APPROVAL' && !mine && <><Button variant="danger" onClick={() => setDialog('reject')}>رفض</Button><Button onClick={() => setDialog('approve')}>اعتماد الحملة</Button></>}
-            {canManage && c.status === 'ACTIVE' && <><Link to={`/campaigns/${id}/tokens`} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 font-semibold hover:bg-ground">الرموز للطباعة</Link><Button onClick={() => setDialog('close')}>إقفال الحملة</Button></>}
+            {canManage && c.status === 'ACTIVE' && <><Link to={`/campaigns/${id}/tokens`} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 font-semibold hover:bg-ground">الرموز للطباعة</Link><Button variant="secondary" disabled={remind.isPending || left === 0} onClick={() => remind.mutate()}>ذكّر من لم يستلم</Button><Button onClick={() => setDialog('close')}>إقفال الحملة</Button></>}
           </div>
         }
       />
@@ -143,7 +153,11 @@ export function Campaign() {
               <tbody>
                 {c.points.map((p) => (
                   <tr key={p.id} className="border-b border-line last:border-0">
-                    <td className="p-2 font-semibold">{p.name}</td>
+                    <td className="p-2">
+                      <strong>{p.name}</strong>
+                      <div className="text-muted">{[p.address, p.hours].filter(Boolean).join(' · ') || 'بلا عنوان ولا ساعات'}</div>
+                      {canManage && <button type="button" className="font-semibold text-brand-strong underline" onClick={() => { savePlace.reset(); setPlace({ id: p.id, name: p.name, address: p.address ?? '', hours: p.hours ?? '' }); }}>مكان الحضور</button>}
+                    </td>
                     <td className="p-2 tabular-nums">{formatNumber(p.delivered)} من {formatNumber(p.assigned)}</td>
                     <td className="p-2 tabular-nums">{formatNumber(p.deliveredQuantity)} من {formatNumber(p.quantity)} {c.unit}</td>
                     <td className="p-2">{p.lastDelivery ? formatDateTime(p.lastDelivery) : '—'}</td>
@@ -192,6 +206,17 @@ export function Campaign() {
           </ul>
         </Card>
       )}
+
+      <Dialog open={!!place} title={`مكان الحضور: ${place?.name ?? ''}`} onClose={() => setPlace(null)}>
+        <p className="text-muted">يُكتبان في دعوة الاستلام والتذكير، ليعرف المدعوّ أين يحضر ومتى.</p>
+        {savePlace.error && <Alert>{savePlace.error.message}</Alert>}
+        <Field label="العنوان">{(fid) => <Input id={fid} value={place?.address ?? ''} onChange={(e) => setPlace({ ...place!, address: e.target.value })} placeholder="مثال: شارع المستشفى، مقابل الصيدلية" />}</Field>
+        <Field label="ساعات الحضور">{(fid) => <Input id={fid} value={place?.hours ?? ''} onChange={(e) => setPlace({ ...place!, hours: e.target.value })} placeholder="مثال: من 9 صباحاً إلى 2 ظهراً" />}</Field>
+        <div className="flex flex-wrap justify-end gap-3">
+          <Button variant="secondary" onClick={() => setPlace(null)}>إلغاء</Button>
+          <Button disabled={savePlace.isPending} onClick={() => savePlace.mutate()}>احفظ</Button>
+        </div>
+      </Dialog>
 
       <CampaignFamilies campaignId={id} campaignStatus={c.status} unit={c.unit} points={c.points} canManage={!!canManage} canExport={!!user && ['ADMIN', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'AUDITOR'].includes(user.role)} />
 

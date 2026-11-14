@@ -117,7 +117,10 @@ const ENT_SQL = `
     left join persons h on h.family_id = f.id and h.relation = 'HEAD'
     join distribution_points ap on ap.id = e.point_id left join distribution_points dp on dp.id = e.delivered_point`;
 
-const INVITE = 'السلام عليكم {الاسم}. مستحقاتكم ({المقدار}) بانتظاركم في نقطة {النقطة} حتى {آخر_موعد}. أحضروا هذا الرمز: {الرمز_الرقمي}. رقم العائلة: {رقم_العائلة}';
+const INVITE = 'السلام عليكم {الاسم}. مستحقاتكم ({المقدار}) بانتظاركم في {مكان_الحضور} حتى {آخر_موعد}. أحضروا هذا الرمز: {الرمز_الرقمي}. رقم العائلة: {رقم_العائلة}';
+const REMINDER = 'تذكير: {الاسم}، مستحقاتكم ({المقدار}) لم تُستلم بعد. الحضور إلى {مكان_الحضور}، وآخر موعد {آخر_موعد}. الرمز: {الرمز_الرقمي}. رقم العائلة: {رقم_العائلة}';
+/** أقل ما بين تذكيرين للحملة نفسها، بالساعات: لا تُغرَق العوائل بالرسائل. */
+const REMINDER_GAP_HOURS = 12;
 
 interface Station { actor: AuthUser; pointId: string; deviceId: string }
 
@@ -158,8 +161,43 @@ export class DistributionService {
   // ---------- نقاط التوزيع ----------
 
   async points() {
-    const { rows } = await this.db.query('select id, name, active from distribution_points order by name');
+    const { rows } = await this.db.query('select id, name, active, address, hours from distribution_points order by name');
     return rows;
+  }
+
+  /** عنوان النقطة وساعاتها: يُكتبان في دعوة الاستلام ليعرف المدعوّ أين يحضر ومتى. */
+  async updatePoint(id: string, patch: { name?: string; address?: string | null; hours?: string | null }, actor: AuthUser) {
+    try {
+      return await this.db.tx(async (c) => {
+        const { rows } = await c.query(
+          `update distribution_points set name = coalesce($2, name), address = case when $3 then $4 else address end, hours = case when $5 then $6 else hours end
+           where id = $1 returning id, name, active, address, hours`,
+          [id, patch.name ?? null, 'address' in patch, patch.address ?? null, 'hours' in patch, patch.hours ?? null]);
+        if (!rows[0]) throw new NotFoundException('النقطة غير موجودة');
+        await this.audit.append(c, { actorId: actor.id, action: 'point.update', entity: 'point', entityId: id, payload: patch });
+        return rows[0];
+      });
+    } catch (err: any) {
+      if (err.code === '23505') throw new ConflictException('نقطة بهذا الاسم موجودة');
+      throw err;
+    }
+  }
+
+  /** تذكير من لم يستلم بعد، برمزه ومكان حضوره. مرة كل 12 ساعة على الأكثر. */
+  async remind(id: string, actor: AuthUser) {
+    const camp = (await this.db.query('select name, status from campaigns where id = $1', [id])).rows[0];
+    if (!camp) throw new NotFoundException('الحملة غير موجودة');
+    if (camp.status !== 'ACTIVE') throw new ConflictException('الحملة ليست جارية');
+    const last = (await this.db.query("select max(at) as at from audit_log where action = 'campaign.remind' and entity_id = $1", [id])).rows[0].at;
+    if (last && Date.now() - new Date(last).getTime() < REMINDER_GAP_HOURS * 3_600_000) {
+      const left = Math.ceil(REMINDER_GAP_HOURS - (Date.now() - new Date(last).getTime()) / 3_600_000);
+      throw new ConflictException(`ذُكّروا قبل قليل. التذكير التالي بعد ${left} ساعة.`);
+    }
+    const pending = (await this.db.query("select count(*)::int as n from entitlements where campaign_id = $1 and status = 'PENDING'", [id])).rows[0].n;
+    if (!pending) throw new ConflictException('لم يبقَ من لم يستلم');
+    await this.db.tx((c) => this.audit.append(c, { actorId: actor.id, action: 'campaign.remind', entity: 'campaign', entityId: id, payload: { pending } }));
+    await this.notifications.system('CAMPAIGN_INVITE', `تذكير: ${camp.name}`, REMINDER, { campaignId: id, pendingOnly: true }, undefined, true);
+    return { reminded: pending };
   }
 
   async createPoint(name: string, actor: AuthUser) {
@@ -522,7 +560,7 @@ export class DistributionService {
     if (!c) throw new NotFoundException('الحملة غير موجودة');
     const [points, recent, incidents, proxy] = await Promise.all([
       this.db.query(
-        `select dp.id, dp.name, count(e.id)::int as assigned, coalesce(sum(e.quantity), 0)::int as quantity,
+        `select dp.id, dp.name, dp.address, dp.hours, count(e.id)::int as assigned, coalesce(sum(e.quantity), 0)::int as quantity,
                 count(e.id) filter (where e.status = 'DELIVERED')::int as delivered,
                 coalesce(sum(e.quantity) filter (where e.status = 'DELIVERED'), 0)::int as delivered_quantity,
                 max(e.delivered_at) as last_delivery
@@ -551,7 +589,7 @@ export class DistributionService {
       id: c.id, name: c.name, status: c.status, unit: c.unit, program: c.program, startsOn: c.starts_on, endsOn: c.ends_on,
       fundId: c.fund_id as string | null, selection: c.selection, kind: c.kind as string, closedAt: c.closed_at, createdBy: c.created_by_username, createdAt: c.created_at, decidedBy: c.decided_by_username, decidedAt: c.decided_at, decisionNote: c.decision_note,
       totals: { families: sum('assigned'), quantity: sum('quantity'), delivered: sum('delivered'), deliveredQuantity: sum('delivered_quantity'), byProxy: proxy.rows[0].n },
-      points: points.rows.map((r) => ({ id: r.id, name: r.name, assigned: r.assigned, quantity: r.quantity, delivered: r.delivered, deliveredQuantity: r.delivered_quantity, lastDelivery: r.last_delivery })),
+      points: points.rows.map((r) => ({ id: r.id, name: r.name, address: r.address, hours: r.hours, assigned: r.assigned, quantity: r.quantity, delivered: r.delivered, deliveredQuantity: r.delivered_quantity, lastDelivery: r.last_delivery })),
       recent: recent.rows.map((r) => ({ id: r.id, familyId: r.family_id, familyNo: r.family_no, receiver: r.receiver, receiverName: r.receiver_name, quantity: r.quantity, deliveredAt: r.delivered_at, mode: r.mode, point: r.point, by: r.username, hasProof: r.has_proof })),
       incidents: incidents.rows.map((r) => ({ id: r.id, kind: r.kind, message: MESSAGES[r.kind as IncidentKind], at: r.at, details: r.details, deviceId: r.device_id, point: r.point, by: r.username, familyNo: r.family_no })),
     };

@@ -137,6 +137,21 @@ run(async ({ step, shot, newPage }) => {
     await mgr.getByText('1–3 من 3').waitFor();
   });
 
+  await step('مكان الحضور يُضبط للنقطة، والتذكير يصل من لم يستلم بعنوانها وساعاتها', async () => {
+    await mgr.getByRole('button', { name: 'مكان الحضور' }).click();
+    const d = mgr.getByRole('dialog');
+    await d.getByLabel('العنوان').fill('شارع المستشفى، مقابل الصيدلية');
+    await d.getByLabel('ساعات الحضور').fill('من 9 صباحاً إلى 2 ظهراً');
+    await d.getByRole('button', { name: 'احفظ' }).click();
+    await mgr.getByText('شارع المستشفى، مقابل الصيدلية · من 9 صباحاً إلى 2 ظهراً').waitFor();
+    await mgr.getByRole('button', { name: 'ذكّر من لم يستلم' }).click();
+    await mgr.getByText('ذُكّرت 3 عائلة لم تستلم').waitFor();
+    const msgs = await call(`/families/${fams[4].id}/messages`, tokens.supervisor);
+    assert.ok(msgs.some((m) => m.text.includes('الحضور إلى نقطة الجامع الكبير، شارع المستشفى، مقابل الصيدلية (من 9 صباحاً إلى 2 ظهراً)')), JSON.stringify(msgs.map((m) => m.text)));
+    await mgr.getByRole('button', { name: 'ذكّر من لم يستلم' }).click();
+    await mgr.getByText(/التذكير التالي بعد 12 ساعة/).waitFor();
+  });
+
   await step('الرجوع إلى حملة سابقة: تُوجد في «السابقة»، ويُستعلم عن عائلة فيها باسمها', async () => {
     await mgr.getByRole('button', { name: 'إقفال الحملة' }).click();
     await mgr.getByRole('dialog').getByRole('button', { name: /إقفال|أقفل/ }).click();

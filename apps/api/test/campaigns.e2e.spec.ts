@@ -243,6 +243,31 @@ describe('تحضير الحملة والاستعلام عنها', () => {
     expect((await api().get(path)).status).toBe(410);
   });
 
+  it('مكان الحضور: عنوان النقطة وساعاتها يدخلان التذكير، والتذكير لمن لم يستلم وحدهم، ولا يتكرر قبل 12 ساعة', async () => {
+    expect((await post(`/points/${pointA}`, 'distributor', { address: 'x' })).status).toBe(403);
+    const upd = await post(`/points/${pointA}`, 'manager', { address: 'شارع المستشفى، مقابل الصيدلية', hours: 'من 9 صباحاً إلى 2 ظهراً' });
+    expect(upd.body).toMatchObject({ address: 'شارع المستشفى، مقابل الصيدلية', hours: 'من 9 صباحاً إلى 2 ظهراً' });
+    expect((await get(`/campaigns/${id}`, 'manager')).body.points.find((p: any) => p.id === pointA).address).toBe('شارع المستشفى، مقابل الصيدلية');
+
+    const sent: { phone: string; text: string; imageUrl?: string }[] = [];
+    app.get(Channels).use({ name: 'التقاط', live: false, async send(_c, phone, text, imageUrl) { sent.push({ phone, text, imageUrl }); return { ok: true }; } });
+    expect((await post(`/campaigns/${id}/remind`, 'distributor')).status).toBe(403);
+    const r = await post(`/campaigns/${id}/remind`, 'manager');
+    app.get(Channels).use(new SimulatedDriver());
+    expect(r.body).toEqual({ reminded: 4 });
+    const pendingWithPhone = (await get(`/campaigns/${id}/families?status=PENDING`, 'manager')).body.rows.filter((x: any) => x.hasPhone).length;
+    expect(sent).toHaveLength(pendingWithPhone);
+    expect(sent.every((m) => m.text.startsWith('تذكير: ') && /الرمز: \d{8}/.test(m.text))).toBe(true);
+    const atA = sent.filter((m) => m.text.includes('نقطة الجامع الكبير، شارع المستشفى، مقابل الصيدلية (من 9 صباحاً إلى 2 ظهراً)'));
+    const atB = sent.filter((m) => m.text.includes('الحضور إلى نقطة المدرسة،'));
+    expect(atA.length + atB.length).toBe(sent.length);
+    expect(atA.length).toBeGreaterThan(0);
+
+    const again = await post(`/campaigns/${id}/remind`, 'manager');
+    expect(again.status).toBe(409);
+    expect(again.body.message).toContain('التذكير التالي بعد 12 ساعة');
+  });
+
   it('الاستعلام عن حال الحملة: بالاسم أو الرقم، وبالحال، وبالنقطة', async () => {
     const all = (await get(`/campaigns/${id}/families`, 'distributor')).body;
     expect(all.total).toBe(5);

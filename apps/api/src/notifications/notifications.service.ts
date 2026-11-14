@@ -28,7 +28,7 @@ export type ComposeInput = z.infer<typeof composeSchema>;
 
 interface Recipient {
   familyId: string; familyNo: string; headName: string; phone: string | null; hasWhatsapp: boolean; prefersVoice: boolean;
-  point?: string; endsOn?: string; quantity?: number; unit?: string; codeEnc?: string; entitlementId?: string;
+  point?: string; pointAddress?: string; pointHours?: string; endsOn?: string; quantity?: number; unit?: string; codeEnc?: string; entitlementId?: string;
 }
 
 /** مهلة إعادة المحاولة بعد العطل العابر، بالدقائق: دقيقة، ثم خمس، ثم ثلاثون. بعدها تُعدّ الرسالة مخفقة. */
@@ -49,7 +49,7 @@ export class NotificationsService {
     if ((a.pendingOnly || a.pointId) && !a.campaignId) throw new BadRequestException('حال الاستلام والنقطة لا يُختاران إلا مع حملة');
     const { rows } = await this.db.query(
       `select f.id, f.family_no, f.phone1, f.has_whatsapp, f.prefers_voice, h.full_name as head_name,
-              dp.name as point, c.ends_on, c.unit, e.quantity, e.code_enc, e.id as entitlement_id
+              dp.name as point, dp.address as point_address, dp.hours as point_hours, c.ends_on, c.unit, e.quantity, e.code_enc, e.id as entitlement_id
        from families f
          left join persons h on h.family_id = f.id and h.relation = 'HEAD'
          left join family_scores sc on sc.family_id = f.id
@@ -69,13 +69,15 @@ export class NotificationsService {
     );
     return rows.map((r) => ({
       familyId: r.id, familyNo: r.family_no, headName: r.head_name, phone: r.phone1, hasWhatsapp: r.has_whatsapp, prefersVoice: r.prefers_voice,
-      point: r.point ?? undefined, endsOn: r.ends_on ?? undefined, quantity: r.quantity ?? undefined, unit: r.unit ?? undefined, codeEnc: r.code_enc ?? undefined, entitlementId: r.entitlement_id ?? undefined,
+      point: r.point ?? undefined, pointAddress: r.point_address ?? undefined, pointHours: r.point_hours ?? undefined, endsOn: r.ends_on ?? undefined, quantity: r.quantity ?? undefined, unit: r.unit ?? undefined, codeEnc: r.code_enc ?? undefined, entitlementId: r.entitlement_id ?? undefined,
     }));
   }
 
   private textFor(body: string, r: Recipient): string {
     return render(body, {
       'الاسم': r.headName, 'رقم_العائلة': r.familyNo, 'النقطة': r.point,
+      // مكان الحضور كاملاً: اسم النقطة، وعنوانها وساعاتها إن ضُبطا.
+      'مكان_الحضور': r.point ? `نقطة ${r.point}${r.pointAddress ? `، ${r.pointAddress}` : ''}${r.pointHours ? ` (${r.pointHours})` : ''}` : undefined,
       'آخر_موعد': r.endsOn ? dateAr.format(new Date(r.endsOn)) : undefined,
       'المقدار': r.quantity !== undefined ? `${r.quantity} ${r.unit ?? ''}`.trim() : undefined,
       'الرمز_الرقمي': r.codeEnc ? this.crypto.decrypt(r.codeEnc) : undefined,
@@ -85,8 +87,8 @@ export class NotificationsService {
   private validateBody(body: string, a: Audience) {
     const unknown = unknownVariables(body);
     if (unknown.length) throw new BadRequestException(`في النص متغيرات لا يعرفها النظام: ${unknown.map((u) => `{${u}}`).join('، ')}`);
-    if (!a.campaignId && /\{(النقطة|آخر_موعد|المقدار|الرمز_الرقمي)\}/.test(body)) {
-      throw new BadRequestException('النقطة والموعد والمقدار والرمز الرقمي لا تُستعمل إلا في رسالة موجَّهة إلى حملة');
+    if (!a.campaignId && /\{(النقطة|مكان_الحضور|آخر_موعد|المقدار|الرمز_الرقمي)\}/.test(body)) {
+      throw new BadRequestException('النقطة ومكان الحضور والموعد والمقدار والرمز الرقمي لا تُستعمل إلا في رسالة موجَّهة إلى حملة');
     }
   }
 
