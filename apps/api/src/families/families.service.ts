@@ -238,7 +238,7 @@ export class FamiliesService {
 
   async get(id: string) {
     const fam = await this.db.query(
-      `select f.*, cu.username as created_by_username, du.username as decided_by_username
+      `select f.*, f.tags::text[] as tags, cu.username as created_by_username, du.username as decided_by_username
        from families f join users cu on cu.id = f.created_by left join users du on du.id = f.decided_by
        where f.id = $1`,
       [id],
@@ -343,7 +343,7 @@ export class FamiliesService {
     const isNumeric = !!q && digits.length > 0 && /^[\d٠-٩\s+]+$/.test(q);
     const nameNorm = q && !isNumeric ? normalizeName(q) : null;
     const { rows } = await this.db.query(
-      `select f.id, f.family_no, f.status, f.tags, f.phone1, f.created_at, h.full_name as head_name,
+      `select f.id, f.family_no, f.status, f.tags::text[] as tags, f.phone1, f.created_at, h.full_name as head_name,
               (select count(*) from persons p where p.family_id = f.id and p.status = 'ACTIVE')::int as members
        from families f left join persons h on h.family_id = f.id and h.relation = 'HEAD'
        where ($1::family_status is null or f.status = $1)

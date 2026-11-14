@@ -1,11 +1,19 @@
+import { useQuery } from '@tanstack/react-query';
 import { NavLink, Outlet } from 'react-router-dom';
+import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { NAV, ROLE_LABEL, canSee } from '../lib/roles';
 import { Button, Icon } from './ui';
 
 export function Shell() {
   const { user, logout } = useAuth();
+  const overview = useQuery({
+    queryKey: ['overview'],
+    queryFn: () => api<{ families: { pendingApproval: number }; openDuplicateFlags: number; pendingChangeRequests: number }>('/stats/overview'),
+    enabled: !!user,
+  });
   if (!user) return null;
+  const waiting = overview.data ? overview.data.families.pendingApproval + overview.data.openDuplicateFlags + overview.data.pendingChangeRequests : 0;
   return (
     <div className="flex min-h-screen flex-wrap">
       <nav aria-label="القائمة الرئيسية" className="flex max-w-full flex-[1_1_15rem] flex-col gap-6 bg-nav px-4 py-6 text-nav-ink md:max-w-64">
@@ -29,7 +37,8 @@ export function Shell() {
                 }
               >
                 <Icon d={item.icon} />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.badge && waiting > 0 && <span className="min-w-6 rounded-full bg-[#F2C879] px-1.5 text-center text-xs font-bold text-[#3A2503]">{waiting}</span>}
               </NavLink>
             </li>
           ))}

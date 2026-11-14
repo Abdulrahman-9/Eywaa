@@ -65,6 +65,9 @@ describe('تسجيل العائلة', () => {
     expect(res.body.status).toBe('PENDING_APPROVAL');
     expect(res.body.familyNo).toMatch(/^\d{7}$/);
     expect(res.body.counts).toEqual({ members: 3, males: 1, females: 2 });
+    expect(res.body.tags).toEqual(['WIDOW']);
+    const listed = await api().get('/api/families').query({ q: res.body.familyNo }).set(as('auditor'));
+    expect(listed.body[0].tags).toEqual(['WIDOW']);
     expect(res.body.monthlyIncomeIqd).toBe(375000);
     expect(res.body.members[0].documents[0].numberMasked).toBe(`********${no.slice(-4)}`);
     expect(res.body.rationCard.numberMasked).toBe('****5001');

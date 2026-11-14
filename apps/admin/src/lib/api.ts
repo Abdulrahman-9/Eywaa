@@ -42,3 +42,21 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   }
   return data as T;
 }
+
+/** رفع ملف (multipart). */
+export async function upload<T>(path: string, form: FormData): Promise<T> {
+  const token = tokenStore.get();
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+  } catch {
+    throw new ApiError(0, 'تعذّر الاتصال بالخادم. تحقق من الشبكة ثم أعد المحاولة.');
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized();
+    const message = res.status === 413 ? 'حجم الملف يتجاوز 10 ميغابايت' : (data && typeof data.message === 'string' && data.message) || 'تعذّر رفع الملف';
+    throw new ApiError(res.status, message, data);
+  }
+  return data as T;
+}

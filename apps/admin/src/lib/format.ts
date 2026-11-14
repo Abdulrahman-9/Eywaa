@@ -6,3 +6,16 @@ export const formatDateTime = (iso: string) => dateTime.format(new Date(iso));
 
 const longDate = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 export const formatLongDate = (d: Date) => longDate.format(d);
+
+const dateOnly = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { dateStyle: 'medium' });
+export const formatDate = (iso: string) => dateOnly.format(new Date(iso));
+
+export function age(birthDate: string | null): string {
+  if (!birthDate) return '—';
+  const b = new Date(birthDate), n = new Date();
+  let years = n.getFullYear() - b.getFullYear();
+  if (n.getMonth() < b.getMonth() || (n.getMonth() === b.getMonth() && n.getDate() < b.getDate())) years--;
+  return years < 1 ? 'دون السنة' : String(years);
+}
+
+export const formatBytes = (n: number) => (n < 1024 * 1024 ? `${Math.ceil(n / 1024)} ك.ب` : `${(n / 1024 / 1024).toFixed(1)} م.ب`);

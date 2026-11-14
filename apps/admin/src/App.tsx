@@ -4,12 +4,14 @@ import { Card, Skeleton } from './components/ui';
 import { useAuth } from './lib/auth';
 import { NAV, canSee } from './lib/roles';
 import { Audit } from './pages/Audit';
+import { Families } from './pages/Families';
+import { Family } from './pages/Family';
+import { Register } from './pages/Register';
+import { Review } from './pages/Review';
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
 import { Settings } from './pages/Settings';
 import { Users } from './pages/Users';
-
-const PAGES: Record<string, () => React.JSX.Element> = { '/': Home, '/users': Users, '/audit': Audit, '/settings': Settings };
 
 function Message({ title, body }: { title: string; body: string }) {
   return (
@@ -20,6 +22,12 @@ function Message({ title, body }: { title: string; body: string }) {
     </Card>
   );
 }
+
+const PAGES: Record<string, () => React.JSX.Element> = {
+  '/': Home, '/families': Families, '/review': Review, '/users': Users, '/audit': Audit, '/settings': Settings,
+};
+const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
+const FORBIDDEN = <Message title="لا صلاحية لك في هذه الصفحة" body="هذه الصفحة ليست من عمل دورك. إن رأيت أنك تحتاجها فراجع مدير النظام." />;
 
 export function App() {
   const { user, loading } = useAuth();
@@ -36,10 +44,12 @@ export function App() {
               path={item.to}
               element={canSee(item, user.role)
                 ? <Page />
-                : <Message title="لا صلاحية لك في هذه الصفحة" body="هذه الصفحة ليست من عمل دورك. إن رأيت أنك تحتاجها فراجع مدير النظام." />}
+                : FORBIDDEN}
             />
           );
         })}
+        <Route path="/families/new" element={REGISTRARS.includes(user.role) ? <Register /> : FORBIDDEN} />
+        <Route path="/families/:id" element={canSee(NAV.find((n) => n.to === '/families')!, user.role) ? <Family /> : FORBIDDEN} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Message title="الصفحة غير موجودة" body="العنوان الذي طلبته لا يقابله شيء في النظام." />} />
       </Route>
