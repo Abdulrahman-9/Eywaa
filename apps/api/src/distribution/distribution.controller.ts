@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Put, HttpCode, Inject, Param, ParseUUIDPipe, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { z } from 'zod';
@@ -101,7 +101,13 @@ export class DistributionController {
   @HttpCode(200)
   @Roles(...MANAGERS)
   preview(@Body(new ZodPipe(previewSchema)) body: z.infer<typeof previewSchema>) {
-    return this.dist.preview(body.programId, body.selection);
+    return this.dist.preview(body.programId, body.selection, body.campaignId);
+  }
+
+  @Put('campaigns/:id')
+  @Roles(...MANAGERS)
+  update(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(campaignSchema)) body: CampaignInput, @CurrentUser() user: AuthUser) {
+    return this.dist.update(id, body, user);
   }
 
   @Get('campaigns/:id/families')

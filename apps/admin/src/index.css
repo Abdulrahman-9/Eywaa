@@ -57,5 +57,20 @@ html {
   .aid-heart, .aid-parcel, .aid-home { animation: none; }
   .aid-parcel { opacity: 1; }
 }
-@keyframes skeleton { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-.skeleton { animation: skeleton 1.4s ease-in-out infinite; background: var(--color-line); border-radius: 6px; }
+@keyframes skeleton { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+.skeleton { animation: skeleton 1.3s linear infinite; background: linear-gradient(90deg, var(--color-line) 25%, #eef1ee 50%, var(--color-line) 75%); background-size: 200% 100%; border-radius: 6px; }
+
+/* نافذة الحوار: تظهر بتكبير خفيف. لا حركة عند الإغلاق: تزول في حينها. */
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dialog-in { from { opacity: 0; transform: translate(50%, -48%) scale(0.96); } to { opacity: 1; transform: translate(50%, -50%) scale(1); } }
+.dialog-overlay { animation: overlay-in 160ms ease-out; }
+.dialog-content { transform: translate(50%, -50%); animation: dialog-in 200ms cubic-bezier(0.2, 0.9, 0.3, 1.1); }
+[dir='ltr'] .dialog-content { transform: translate(-50%, -50%); }
+
+/* دخول الصفحة: ترتفع قليلاً وتتضح. */
+@keyframes page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.page-in { animation: page-in 220ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton, .dialog-overlay, .dialog-content, .page-in { animation: none; }
+}

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { motion } from 'motion/react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { NAV, ROLE_LABEL, canSee } from '../lib/roles';
@@ -15,6 +16,9 @@ export function Shell() {
     queryFn: () => api<{ families: { pendingApproval: number }; openDuplicateFlags: number; pendingChangeRequests: number; visitedReassessments: number }>('/stats/overview'),
     enabled: !!user,
   });
+  const { pathname } = useLocation();
+  // مراحل المعالج صفحة واحدة تتبدّل مرحلتها: لا يُعاد دخولها عند كل مرحلة.
+  const pageKey = pathname.replace(/\/(new|edit)\/[^/]+$/, '/$1');
   if (!user) return null;
   const waiting = overview.data ? overview.data.families.pendingApproval + overview.data.openDuplicateFlags + overview.data.pendingChangeRequests + overview.data.visitedReassessments : 0;
   return (
@@ -35,13 +39,19 @@ export function Shell() {
               <NavLink
                 to={item.to}
                 end={item.to === '/'}
-                className={({ isActive }) =>
-                  `flex min-h-11 items-center gap-3 rounded-lg px-3 ${isActive ? 'bg-nav-active font-semibold text-white' : 'hover:bg-nav-active/60'}`
-                }
+                className={({ isActive }) => `relative flex min-h-11 items-center gap-3 rounded-lg px-3 transition-colors ${isActive ? 'font-semibold text-white' : 'hover:bg-nav-active/60'}`}
               >
-                <Icon d={item.icon} />
-                <span className="flex-1">{item.label}</span>
-                {item.badge && waiting > 0 && <span className="min-w-6 rounded-full bg-[#F2C879] px-1.5 text-center text-xs font-bold text-[#3A2503]">{waiting}</span>}
+                {({ isActive }) => (
+                  <>
+                    {/* خلفية البند النشط تنزلق من بند إلى بند. */}
+                    {isActive && <motion.span layoutId="nav-active" className="absolute inset-0 rounded-lg bg-nav-active" transition={{ type: 'spring', stiffness: 480, damping: 40 }} />}
+                    <span className="relative flex flex-1 items-center gap-3">
+                      <Icon d={item.icon} />
+                      <span className="flex-1">{item.label}</span>
+                      {item.badge && waiting > 0 && <span className="min-w-6 rounded-full bg-[#F2C879] px-1.5 text-center text-xs font-bold text-[#3A2503]">{waiting}</span>}
+                    </span>
+                  </>
+                )}
               </NavLink>
             </li>
           ))}
@@ -62,7 +72,7 @@ export function Shell() {
           <Button variant="ghost" onClick={() => setAccount(true)}>حسابي{user.totpRecommended && !user.totpEnabled ? ' ●' : ''}</Button>
           <Button variant="secondary" onClick={logout}>تسجيل الخروج</Button>
         </header>
-        <main className="flex flex-col gap-6 px-4 py-6 md:px-8">
+        <main key={pageKey} className="page-in flex flex-col gap-6 px-4 py-6 md:px-8">
           <Outlet />
         </main>
         <AccountDialog open={account} onClose={() => setAccount(false)} />

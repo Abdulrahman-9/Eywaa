@@ -205,6 +205,44 @@ describe('تحضير الحملة والاستعلام عنها', () => {
     expect((await del(inside[1].entitlementId, { note: 'بعد الإرسال' })).status).toBe(409);
   });
 
+  it('تعديل المسودة بالحقول نفسها: يُعاد اختيار العوائل، وعوائلها الحالية ليست مشغولة عنها', async () => {
+    const programs = (await get('/programs', 'manager')).body;
+    const d = await post('/campaigns', 'manager', { programId: programs.find((p: any) => p.name === 'لحوم الأضاحي').id, name: 'مسودة للتعديل', startsOn: '2026-02-01', endsOn: '2026-02-10', pointIds: [pointA], selection: { limit: 2, order: 'OLDEST' } });
+    expect(d.status).toBe(201);
+    const before = (await get(`/campaigns/${d.body.id}/families`, 'manager')).body.rows.map((r: any) => r.familyNo);
+    expect(before).toHaveLength(2);
+    // المعاينة عند التعديل تعدّ عوائل المسودة متاحة لها.
+    const blind = await preview({ limit: 3, order: 'OLDEST' });
+    const aware = (await post('/campaigns/preview', 'manager', { programId, campaignId: d.body.id, selection: { limit: 3, order: 'OLDEST' } })).body;
+    expect(aware.funnel.available).toBe(blind.funnel.available + 2);
+
+    const put = (user: string, body: any) => api().put(`/api/campaigns/${d.body.id}`).set(as(user)).send(body);
+    expect((await put('distributor', {})).status).toBe(403);
+    const upd = await put('manager', { programId, name: 'مسودة بعد التعديل', startsOn: '2026-03-01', endsOn: '2026-03-05', pointIds: [pointA, pointB], selection: { limit: 3, order: 'OLDEST', exclude: [before[0]] } });
+    expect(upd.status).toBe(200);
+    expect(upd.body).toMatchObject({ name: 'مسودة بعد التعديل', status: 'DRAFT', programId });
+    expect(upd.body.startsOn).toContain('2026-03-01');
+    // المتاح للمسودة ثلاث (الباقيات في حملة تنتظر الاعتماد)، واستُثنيت واحدة.
+    expect(upd.body.totals.families).toBe(2);
+    expect(upd.body.points).toHaveLength(2);
+    const after = (await get(`/campaigns/${d.body.id}/families`, 'manager')).body.rows.map((r: any) => r.familyNo);
+    expect(after).not.toContain(before[0]);
+    expect(after).toContain(before[1]);
+
+    // التعديل اليدوي في صفحة المسودة يُحفظ في الاختيار، فيعود في صفحات التحضير.
+    await post(`/campaigns/${d.body.id}/families`, 'manager', { familyNo: before[0] });
+    const ent = (await get(`/campaigns/${d.body.id}/families`, 'manager')).body.rows.find((r: any) => r.familyNo === after[0]);
+    await api().delete(`/api/campaigns/${d.body.id}/families/${ent.entitlementId}`).set(as('manager')).send({ note: 'للتجربة' });
+    const sel = (await get(`/campaigns/${d.body.id}`, 'manager')).body.selection;
+    expect(sel.include).toEqual([before[0]]);
+    expect(sel.exclude).toEqual([after[0]]);
+
+    await post(`/campaigns/${d.body.id}/cancel`, 'manager', { note: 'انتهت التجربة' });
+    expect((await put('manager', { programId, name: 'بعد الإلغاء', startsOn: '2026-03-01', endsOn: '2026-03-05', pointIds: [pointA] })).status).toBe(409);
+    const log = await sql("select payload from audit_log where action = 'campaign.update'");
+    expect(log.rows[0].payload).toMatchObject({ name: 'مسودة بعد التعديل', was: 'مسودة للتعديل', families: 2 });
+  });
+
   it('الدعوة: صورة الرمز لمن له واتساب، والرمز الرقمي في النص للجميع، ومن لا هاتف له يظهر', async () => {
     process.env.PUBLIC_BASE_URL = 'https://eywaa.example.org/';
     const sent: { channel: Channel; phone: string; text: string; imageUrl?: string }[] = [];

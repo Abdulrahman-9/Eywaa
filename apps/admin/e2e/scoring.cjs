@@ -58,7 +58,7 @@ async function login(page, username, password) {
   });
 
   await step('المدير يرفع حدّ الفئة أ فيرى الأثر قبل أن يطلب', async () => {
-    await adminPage.getByRole('link', { name: 'النقاط والفئات' }).click();
+    await adminPage.getByRole('navigation', { name: 'القائمة الرئيسية' }).getByRole('link', { name: 'النقاط والفئات' }).click();
     await adminPage.getByText('غيّر وزناً أو حدّاً').waitFor();
     await adminPage.getByLabel('الفئة أ: من').fill('80');
     await adminPage.getByText('تنزل من أ إلى ب').waitFor();
@@ -85,7 +85,7 @@ async function login(page, username, password) {
 
   await step('المشرف يعتمد الإصدار، فتنتقل العائلة إلى الفئة ب', async () => {
     await login(supPage, `sup${RUN}`, PASSWORD);
-    await supPage.getByRole('link', { name: 'النقاط والفئات' }).click();
+    await supPage.getByRole('navigation', { name: 'القائمة الرئيسية' }).getByRole('link', { name: 'النقاط والفئات' }).click();
     await supPage.getByRole('button', { name: 'اعتماد الإصدار 2' }).click();
     await supPage.getByRole('dialog').getByRole('button', { name: 'اعتماد الإصدار' }).click();
     await supPage.getByText('اعتُمد الإصدار وأُعيد حساب النقاط').waitFor();

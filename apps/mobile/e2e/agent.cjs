@@ -86,9 +86,9 @@ const shot = async (page, name) => SHOTS && page.screenshot({ path: `${SHOTS}/${
     });
 
     await step('المدير يخوّله من صفحة الحملة: سقف ومدة وسبب', async () => {
-      await desk.getByRole('button', { name: 'تسجيل الخروج' }).click().catch(() => {});
+      // شاشة المتعهد في اللوحة بلا زرّ خروج: تُمحى جلسته من التبويب ليدخل المدير.
+      await desk.evaluate(() => sessionStorage.clear());
       await desk.goto(ADMIN);
-      if (await desk.getByText('عمل المتعهد من تطبيق الميدان').count()) { await desk.evaluate(() => sessionStorage.clear()); await desk.reload(); }
       await desk.getByLabel('اسم المستخدم').fill(names.manager);
       await desk.getByLabel('كلمة المرور').fill(PASSWORD);
       await desk.getByRole('button', { name: 'دخول' }).click();

@@ -63,7 +63,7 @@ export const selectionSchema = z.object({
   manualOnly: z.boolean().default(false),
 }).strict();
 export type Selection = z.infer<typeof selectionSchema>;
-export const previewSchema = z.object({ programId: z.string().uuid(), selection: selectionSchema.default({} as any) });
+export const previewSchema = z.object({ programId: z.string().uuid(), selection: selectionSchema.default({} as any), campaignId: z.string().uuid().optional() });
 export const listFamiliesSchema = z.object({
   q: z.string().trim().optional(), status: z.enum(['PENDING', 'DELIVERED', 'CANCELLED']).optional(), pointId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100), offset: z.coerce.number().int().min(0).default(0),
@@ -259,7 +259,8 @@ export class DistributionService {
   // ---------- الحملات ----------
 
   /** ينشئ مسودة حملة: قائمة المستحقين تؤخذ من قواعد البرنامج لحظة الإنشاء، وتُوزَّع على النقاط بالتساوي. */
-  async create(input: CampaignInput, actor: AuthUser) {
+  /** يتحقق من مدخلات الحملة ويحسب من يدخلها. مشترك بين الإنشاء وتعديل المسودة. */
+  private async resolve(input: CampaignInput, exceptCampaign?: string) {
     const program = await this.programs.get(input.programId);
     if (!program.active) throw new ConflictException('البرنامج معطَّل');
     if (program.kind === 'MONEY' && !input.fundId) throw new BadRequestException('الحملة المالية يلزمها صندوق تُصرف منه');
@@ -268,27 +269,58 @@ export class DistributionService {
     if (points.rowCount !== new Set(input.pointIds).size) throw new BadRequestException('في النقاط المختارة نقطة غير موجودة أو معطَّلة');
 
     const selection = selectionSchema.parse(input.selection ?? {});
-    const picked = await this.select(program, selection);
+    const picked = await this.select(program, selection, exceptCampaign);
     if (picked.rejected.length) throw new BadRequestException({ message: `لا تدخل الحملةَ هذه العوائل المضافة باليد: ${picked.rejected.slice(0, 8).map((r) => `${r.familyNo} (${r.reason})`).join('، ')}`, rejected: picked.rejected });
-    const list = picked.chosen;
-    if (!list.length) throw new ConflictException(picked.funnel.available ? 'لا عائلة تطابق هذا الاختيار. وسّع التصفية.' : 'لا عائلة تستحق هذا البرنامج الآن');
+    if (!picked.chosen.length) throw new ConflictException(picked.funnel.available ? 'لا عائلة تطابق هذا الاختيار. وسّع التصفية.' : 'لا عائلة تستحق هذا البرنامج الآن');
+    return { program, selection, picked, list: picked.chosen };
+  }
 
+  private async fill(c: PoolClient, campaignId: string, list: Candidate[], pointIds: string[]) {
+    await c.query(
+      `insert into entitlements (campaign_id, family_id, point_id, serial, quantity, picked_by)
+       select $1, x.family_id, x.point_id, x.serial, x.quantity, x.picked::pick_source
+       from unnest($2::uuid[], $3::uuid[], $4::int[], $5::int[], $6::text[]) as x(family_id, point_id, serial, quantity, picked)`,
+      [campaignId, list.map((e) => e.familyId), list.map((_, i) => pointIds[i % pointIds.length]), list.map((_, i) => i + 1), list.map((e) => e.quantity), list.map((e) => e.pickedBy ?? 'RULE')],
+    );
+  }
+
+  async create(input: CampaignInput, actor: AuthUser) {
+    const { program, selection, picked, list } = await this.resolve(input);
     const id = await this.db.tx(async (c) => {
       const { rows } = await c.query(
         'insert into campaigns (name, program_id, unit, starts_on, ends_on, created_by, fund_id, selection) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id',
         [input.name, program.id, program.unit, input.startsOn, input.endsOn, actor.id, input.fundId ?? null, JSON.stringify(selection)],
       );
-      await c.query(
-        `insert into entitlements (campaign_id, family_id, point_id, serial, quantity, picked_by)
-         select $1, x.family_id, x.point_id, x.serial, x.quantity, x.picked::pick_source
-         from unnest($2::uuid[], $3::uuid[], $4::int[], $5::int[], $6::text[]) as x(family_id, point_id, serial, quantity, picked)`,
-        [rows[0].id, list.map((e) => e.familyId), list.map((_, i) => input.pointIds[i % input.pointIds.length]), list.map((_, i) => i + 1), list.map((e) => e.quantity), list.map((e) => e.pickedBy ?? 'RULE')],
-      );
+      await this.fill(c, rows[0].id, list, input.pointIds);
       await this.audit.append(c, {
         actorId: actor.id, action: 'campaign.create', entity: 'campaign', entityId: rows[0].id,
         payload: { name: input.name, program: program.name, families: list.length, quantity: list.reduce((s, e) => s + e.quantity, 0), funnel: picked.funnel, selection },
       });
       return rows[0].id as string;
+    });
+    return this.detail(id);
+  }
+
+  /**
+   * تعديل المسودة: الحقول نفسها التي أُنشئت بها، ويُعاد اختيار عوائلها من جديد.
+   * لا يُعدَّل ما أُرسل للاعتماد: المعتمِد يعتمد ما رآه.
+   */
+  async update(id: string, input: CampaignInput, actor: AuthUser) {
+    const current = (await this.db.query('select status from campaigns where id = $1', [id])).rows[0];
+    if (!current) throw new NotFoundException('الحملة غير موجودة');
+    if (current.status !== 'DRAFT') throw new ConflictException('لا تُعدَّل الحملة إلا وهي مسودة');
+    const { program, selection, picked, list } = await this.resolve(input, id);
+    await this.db.tx(async (c) => {
+      const row = (await c.query('select status, name from campaigns where id = $1 for update', [id])).rows[0];
+      if (row.status !== 'DRAFT') throw new ConflictException('لا تُعدَّل الحملة إلا وهي مسودة');
+      await c.query('delete from entitlements where campaign_id = $1', [id]);
+      await c.query('update campaigns set name = $2, program_id = $3, unit = $4, starts_on = $5, ends_on = $6, fund_id = $7, selection = $8 where id = $1',
+        [id, input.name, program.id, program.unit, input.startsOn, input.endsOn, input.fundId ?? null, JSON.stringify(selection)]);
+      await this.fill(c, id, list, input.pointIds);
+      await this.audit.append(c, {
+        actorId: actor.id, action: 'campaign.update', entity: 'campaign', entityId: id,
+        payload: { name: input.name, was: row.name, program: program.name, families: list.length, quantity: list.reduce((s, e) => s + e.quantity, 0), funnel: picked.funnel, selection },
+      });
     });
     return this.detail(id);
   }
@@ -375,8 +407,8 @@ export class DistributionService {
   }
 
   /** يطبّق الاختيار ويعيد المختارين بترتيبهم، وعدد من بقي بعد كل خطوة. */
-  private async select(program: { id: string; minGapDays: number; rules: any; amount: any }, sel: Selection) {
-    const { rows: free, eligible, busy } = await this.available(program);
+  private async select(program: { id: string; minGapDays: number; rules: any; amount: any }, sel: Selection, exceptCampaign?: string) {
+    const { rows: free, eligible, busy } = await this.available(program, exceptCampaign);
     const out = new Set(sel.exclude);
     const matched = sel.manualOnly ? [] : free.filter((c) => this.misses(c, sel).length === 0);
     const filtered = matched.length;
@@ -482,9 +514,10 @@ export class DistributionService {
   }
 
   /** معاينة اختيار لم يُحفظ: كم يبقى بعد كل خطوة، ومن هم، وإن نقصوا عن العدد المستهدف فكيف يُكمَل. لا تُنشئ شيئاً. */
-  async preview(programId: string, sel: Selection) {
+  async preview(programId: string, sel: Selection, exceptCampaign?: string) {
     const program = await this.programs.get(programId);
-    const r = await this.select(program, sel);
+    // عند تعديل مسودة: عوائلها الحالية ليست «مشغولة» عنها.
+    const r = await this.select(program, sel, exceptCampaign);
     // النقص عن العدد المستهدف. ما أُضيف بالترشيح واليد يسدّ منه.
     const gap = sel.limit !== undefined && !sel.manualOnly ? Math.max(0, sel.limit - r.funnel.final) : 0;
     return {
@@ -544,6 +577,10 @@ export class DistributionService {
         await tx.query(
           "insert into entitlements (campaign_id, family_id, point_id, serial, quantity, picked_by) values ($1,$2,$3,(select coalesce(max(serial), 0) + 1 from entitlements where campaign_id = $1),$4,'MANUAL')",
           [id, c.familyId, point, c.quantity]);
+        // الاختيار المحفوظ يتبع التعديل اليدوي، فإعادة فتح المسودة في صفحات التحضير تعيد العوائل نفسها.
+        await tx.query(
+          `update campaigns set selection = jsonb_set(jsonb_set(selection, '{include}', (select coalesce(jsonb_agg(distinct x), '[]') from jsonb_array_elements_text(coalesce(selection->'include', '[]') || to_jsonb($2::text)) x)),
+             '{exclude}', (select coalesce(jsonb_agg(x), '[]') from jsonb_array_elements_text(coalesce(selection->'exclude', '[]')) x where x <> $2)) where id = $1`, [id, no]);
         await this.audit.append(tx, { actorId: actor.id, action: 'campaign.add_family', entity: 'campaign', entityId: id, payload: { familyNo: no, quantity: c.quantity } });
       });
     } catch (err: any) {
@@ -564,6 +601,13 @@ export class DistributionService {
       const gone = await tx.query(
         'delete from entitlements e using families f where e.id = $1 and e.campaign_id = $2 and f.id = e.family_id returning f.family_no', [entitlementId, id]);
       if (!gone.rowCount) throw new NotFoundException('العائلة ليست في هذه الحملة');
+      // تخرج من المضافات والمرشَّحات إن كانت منها، وتدخل المستثنيات لئلا تعيدها القواعد.
+      await tx.query(
+        `update campaigns set selection = selection
+           || jsonb_build_object('include', (select coalesce(jsonb_agg(x), '[]') from jsonb_array_elements_text(coalesce(selection->'include', '[]')) x where x <> $2))
+           || jsonb_build_object('nominated', (select coalesce(jsonb_agg(x), '[]') from jsonb_array_elements_text(coalesce(selection->'nominated', '[]')) x where x <> $2))
+           || jsonb_build_object('exclude', (select coalesce(jsonb_agg(distinct x), '[]') from jsonb_array_elements_text(coalesce(selection->'exclude', '[]') || to_jsonb($2::text)) x))
+         where id = $1`, [id, gone.rows[0].family_no]);
       await this.audit.append(tx, { actorId: actor.id, action: 'campaign.remove_family', entity: 'campaign', entityId: id, payload: { familyNo: gone.rows[0].family_no, note } });
     });
     return this.detail(id);
@@ -629,7 +673,7 @@ export class DistributionService {
     ]);
     const sum = (key: string) => points.rows.reduce((s, r) => s + r[key], 0);
     return {
-      id: c.id, name: c.name, status: c.status, unit: c.unit, program: c.program, startsOn: c.starts_on, endsOn: c.ends_on,
+      id: c.id, name: c.name, status: c.status, unit: c.unit, program: c.program, programId: c.program_id as string, startsOn: c.starts_on, endsOn: c.ends_on,
       fundId: c.fund_id as string | null, selection: c.selection, kind: c.kind as string, closedAt: c.closed_at, createdBy: c.created_by_username, createdAt: c.created_at, decidedBy: c.decided_by_username, decidedAt: c.decided_at, decisionNote: c.decision_note,
       totals: { families: sum('assigned'), quantity: sum('quantity'), delivered: sum('delivered'), deliveredQuantity: sum('delivered_quantity'), byProxy: proxy.rows[0].n },
       points: points.rows.map((r) => ({ id: r.id, name: r.name, address: r.address, hours: r.hours, agentName: r.agent_name as string | null, assigned: r.assigned, quantity: r.quantity, delivered: r.delivered, deliveredQuantity: r.delivered_quantity, lastDelivery: r.last_delivery })),

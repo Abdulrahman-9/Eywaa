@@ -6,7 +6,7 @@ import { useAuth } from './lib/auth';
 import { NAV, canSee } from './lib/roles';
 import { Audit } from './pages/Audit';
 import { Campaign } from './pages/Campaign';
-import { CampaignNew } from './pages/CampaignNew';
+import { CampaignWizard } from './pages/CampaignWizard';
 import { Campaigns } from './pages/Campaigns';
 import { Cashbox } from './pages/Cashbox';
 import { Desk } from './pages/Desk';
@@ -45,7 +45,7 @@ const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 const FORBIDDEN = <Message title="لا صلاحية لك في هذه الصفحة" body="هذه الصفحة ليست من عمل دورك. إن رأيت أنك تحتاجها فراجع مدير النظام." />;
 
 export function App() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
   if (loading) return <div className="p-8"><Skeleton className="h-8 w-64" /></div>;
   if (!user) return <Login />;
   // الكلمة المؤقتة لا يُعمل بها: تُغيَّر أولاً.
@@ -64,6 +64,7 @@ export function App() {
         <h1 className="text-2xl font-bold">أهلاً {user.fullName}</h1>
         <p>عمل المتعهد من تطبيق الميدان على الهاتف: حصتك من الحملة، والتسليم، وما خُوّلتَ به.</p>
         <a href="/m/" className="inline-flex min-h-12 items-center justify-center rounded-lg bg-brand px-4 font-semibold text-white">افتح تطبيق الميدان</a>
+        <button type="button" onClick={logout} className="min-h-11 font-semibold text-muted underline">تسجيل الخروج</button>
       </div>
     );
   }
@@ -85,7 +86,8 @@ export function App() {
         <Route path="/families/import" element={['ADMIN', 'BENEFICIARY_SUPERVISOR'].includes(user.role) ? <Import /> : FORBIDDEN} />
         <Route path="/families/new" element={REGISTRARS.includes(user.role) ? <Register /> : FORBIDDEN} />
         <Route path="/families/:id" element={canSee(NAV.find((n) => n.to === '/families')!, user.role) ? <Family /> : FORBIDDEN} />
-        <Route path="/campaigns/new" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <CampaignNew /> : FORBIDDEN} />
+        <Route path="/campaigns/new/:step?" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <CampaignWizard /> : FORBIDDEN} />
+        <Route path="/campaigns/:id/edit/:step?" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <CampaignWizard /> : FORBIDDEN} />
         <Route path="/campaigns/:id" element={canSee(NAV.find((n) => n.to === '/campaigns')!, user.role) ? <Campaign /> : FORBIDDEN} />
         <Route path="/campaigns/:id/tokens" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <Tokens /> : FORBIDDEN} />
         <Route path="/housing/:id" element={canSee(NAV.find((n) => n.to === '/housing')!, user.role) ? <HousingProject /> : FORBIDDEN} />

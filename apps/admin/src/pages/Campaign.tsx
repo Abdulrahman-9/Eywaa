@@ -11,38 +11,9 @@ import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Skeleton 
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
-import { ORDER_AR } from './CampaignNew';
 import { CAMPAIGN_STATUS, type CampaignStatus } from './Campaigns';
-import { CLASS_AR } from './Scoring';
-import { TAGS } from '../lib/labels';
+import { describeSelection, type Selection } from '../lib/campaign';
 import { ReconcileTable, type Reconcile } from './Warehouse';
-
-interface Selection {
-  classes?: string[]; minPoints?: number; maxPoints?: number; registeredFrom?: string; registeredTo?: string; membersMin?: number; membersMax?: number;
-  tagsAny?: string[]; mahallas?: string[]; order?: keyof typeof ORDER_AR; limit?: number; maxQuantity?: number; include?: string[]; nominated?: string[]; exclude?: string[]; manualOnly?: boolean;
-  maxBenefits?: { count: number; months: number; scope: 'PROGRAM' | 'ALL' }; notSinceDays?: { days: number; scope: 'PROGRAM' | 'ALL' };
-}
-
-/** كيف اختيرت عوائل الحملة، بكلام يُقرأ: للمعتمِد اليوم، ولمن يرجع إليها بعد عام. */
-function describeSelection(s: Selection, unit: string): string[] {
-  if (s.manualOnly) return [`اختيرت باليد: ${s.include?.length ?? 0} عائلة بأرقامها`];
-  const out: string[] = [];
-  if (s.classes?.length) out.push(`الفئة ${s.classes.map((c) => CLASS_AR[c as keyof typeof CLASS_AR]).join(' أو ')}`);
-  if (s.minPoints !== undefined) out.push(`${s.minPoints} نقطة فأكثر`);
-  if (s.membersMin !== undefined || s.membersMax !== undefined) out.push(`الأفراد ${s.membersMin ?? 1} إلى ${s.membersMax ?? 'ما فوق'}`);
-  if (s.registeredFrom || s.registeredTo) out.push(`سُجّلت ${s.registeredFrom ? `من ${formatDate(s.registeredFrom)} ` : ''}${s.registeredTo ? `حتى ${formatDate(s.registeredTo)}` : ''}`.trim());
-  if (s.tagsAny?.length) out.push(s.tagsAny.map((t) => TAGS[t as keyof typeof TAGS]).join(' أو '));
-  if (s.mahallas?.length) out.push(`المحلة: ${s.mahallas.join('، ')}`);
-  const scope = (x: 'PROGRAM' | 'ALL') => (x === 'ALL' ? 'من كل البرامج' : 'من هذا البرنامج');
-  if (s.maxBenefits) out.push(s.maxBenefits.count === 0 ? `لم تستفد ${scope(s.maxBenefits.scope)} في آخر ${s.maxBenefits.months} شهراً` : `استفادت ${s.maxBenefits.count} مرة على الأكثر ${scope(s.maxBenefits.scope)} في آخر ${s.maxBenefits.months} شهراً`);
-  if (s.notSinceDays) out.push(`لم تستلم ${scope(s.notSinceDays.scope)} منذ ${s.notSinceDays.days} يوماً`);
-  if (!out.length) out.push('كل من يستحق البرنامج');
-  if (s.limit || s.maxQuantity) out.push(`المستهدف ${[s.limit && `${formatNumber(s.limit)} عائلة`, s.maxQuantity && `${formatNumber(s.maxQuantity)} ${unit}`].filter(Boolean).join(' و')}، ${ORDER_AR[s.order ?? 'FAMILY_NO']}`);
-  if (s.nominated?.length) out.push(`أُكمل العدد بالترشيح: ${s.nominated.length}`);
-  if (s.include?.length) out.push(`أُضيفت باليد: ${s.include.length}`);
-  if (s.exclude?.length) out.push(`استُثنيت باليد: ${s.exclude.length}`);
-  return out;
-}
 
 interface Detail {
   id: string; name: string; status: CampaignStatus; unit: string; program: string; startsOn: string; endsOn: string;
@@ -114,7 +85,7 @@ export function Campaign() {
         action={
           <div className="flex flex-wrap items-center gap-2.5">
             <Badge tone={CAMPAIGN_STATUS[c.status][1]}>{CAMPAIGN_STATUS[c.status][0]}</Badge>
-            {canManage && c.status === 'DRAFT' && <><Button variant="danger" onClick={() => setDialog('cancel')}>إلغاء الحملة</Button><Button disabled={act.isPending} onClick={() => act.mutate({ verb: 'submit' })}>أرسل للاعتماد</Button></>}
+            {canManage && c.status === 'DRAFT' && <><Button variant="danger" onClick={() => setDialog('cancel')}>إلغاء الحملة</Button><Link to={`/campaigns/${id}/edit/basics`} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 font-semibold transition-colors hover:bg-ground">عدّل الحملة</Link><Button disabled={act.isPending} onClick={() => act.mutate({ verb: 'submit' })}>أرسل للاعتماد</Button></>}
             {canManage && c.status === 'PENDING_APPROVAL' && !mine && <><Button variant="danger" onClick={() => setDialog('reject')}>رفض</Button><Button onClick={() => setDialog('approve')}>اعتماد الحملة</Button></>}
             {canManage && c.status === 'ACTIVE' && <><Link to={`/campaigns/${id}/tokens`} className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 font-semibold hover:bg-ground">الرموز للطباعة</Link><Button variant="secondary" disabled={remind.isPending || left === 0} onClick={() => remind.mutate()}>ذكّر من لم يستلم</Button><Button onClick={() => setDialog('close')}>إقفال الحملة</Button></>}
           </div>

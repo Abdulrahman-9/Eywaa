@@ -34,27 +34,51 @@ run(async ({ step, shot, newPage }) => {
     assert.equal(await admin.getByRole('button', { name: 'لحوم الصدقات' }).count(), 1);
   });
 
-  await step('تحضير الحملة: كل شرط يضيّق، والمعاينة تتبع', async () => {
+  const waitFinal = (n) => mgr.waitForFunction((x) => document.querySelector('[data-testid=final]')?.textContent === x, String(n));
+  const next = () => mgr.getByRole('button', { name: 'التالي' }).click();
+  const page = (n, title) => mgr.getByRole('button', { name: new RegExp(`^${n}\\. ${title}`) }).click();
+
+  await step('المعالج صفحات: لا تُتجاوز صفحة ناقصة، وما كُتب يبقى عند الرجوع وعند تحديث الصفحة', async () => {
     await mgr.getByRole('link', { name: 'حملات التوزيع' }).click();
     await mgr.getByRole('link', { name: 'حملة جديدة' }).click();
+    await mgr.getByRole('navigation', { name: 'مراحل التحضير' }).waitFor();
+    assert.equal(await mgr.getByRole('button', { name: 'التالي' }).isDisabled(), true);
+    assert.equal(await mgr.getByRole('button', { name: 'السابق' }).isDisabled(), true);
+    assert.equal(await mgr.getByRole('button', { name: /^3\. العوائل/ }).isDisabled(), true);
+    await mgr.getByText('اختر البرنامج', { exact: true }).waitFor();
     await mgr.getByLabel('البرنامج').selectOption({ label: 'لحوم الأضاحي' });
     await mgr.getByLabel('اسم الحملة').fill('أضاحي العيد');
-    await mgr.getByLabel('الجامع الكبير', { exact: true }).check();
-    await mgr.getByTestId('final').waitFor();
-    await mgr.waitForFunction(() => document.querySelector('[data-testid=final]')?.textContent === '7');
+    await waitFinal(7);
+    await next();
+    assert.match(mgr.url(), /\/campaigns\/new\/rules$/);
     await mgr.getByLabel('أقل عدد أفراد').fill('3');
-    await mgr.waitForFunction(() => document.querySelector('[data-testid=final]')?.textContent === '5');
+    await waitFinal(5);
+    await mgr.getByText('عائلة تطابق القواعد، من 7 متاحة.').waitFor();
     await mgr.getByLabel('الأَولى فالأَولى').selectOption('POINTS');
+    // رجوع: الاسم كما كُتب. ثم تحديث الصفحة في منتصف العمل: كل شيء باقٍ.
+    await mgr.getByRole('button', { name: 'السابق' }).click();
+    assert.equal(await mgr.getByLabel('اسم الحملة').inputValue(), 'أضاحي العيد');
     await mgr.getByLabel('كم عائلة تستهدف؟').fill('3');
-    await mgr.waitForFunction(() => document.querySelector('[data-testid=final]')?.textContent === '3');
+    await waitFinal(3);
+    await mgr.reload();
+    assert.equal(await mgr.getByLabel('اسم الحملة').inputValue(), 'أضاحي العيد');
+    assert.equal(await mgr.getByLabel('كم عائلة تستهدف؟').inputValue(), '3');
+    await next();
+    assert.equal(await mgr.getByLabel('أقل عدد أفراد').inputValue(), '3');
+    assert.equal(await mgr.getByLabel('الأَولى فالأَولى').inputValue(), 'POINTS');
+    await shot(mgr, '54-wizard-rules');
+    await next();
+    await waitFinal(3);
+    await mgr.locator('tbody tr').nth(2).waitFor();
     // الأعلى نقاطاً من ذوات الثلاثة فأكثر: الثالثة والرابعة والخامسة (السادسة والسابعة دخلهما كبير).
     const shown = await mgr.locator('tbody tr td:nth-child(2)').allTextContents();
     assert.deepEqual([...shown].sort(), [fams[2], fams[3], fams[4]].map((f) => f.familyNo).sort());
   });
 
   await step('العدد المستهدف أكبر مما طابق القواعد: يُعرض النقص، ويُكمَل بالتقريب أو بالترشيح', async () => {
-    const waitFinal = (n) => mgr.waitForFunction((x) => document.querySelector('[data-testid=final]')?.textContent === x, String(n));
+    await page(1, 'الأساس');
     await mgr.getByLabel('كم عائلة تستهدف؟').fill('6');
+    await page(3, 'العوائل');
     await mgr.getByRole('heading', { name: 'ينقص 1 عن العدد المستهدف (6)' }).waitFor();
     const gap = mgr.getByRole('region', { name: 'إكمال العدد' });
     // التقريب: أقرب حدّ يسدّ النقص هو 2 أفراد، لا 1.
@@ -64,20 +88,26 @@ run(async ({ step, shot, newPage }) => {
     await gap.locator(`[data-nominee="${fams[1].familyNo}"]`).getByText(/لم تستفد من المركز قط · خارج القواعد: أفرادها 2/).waitFor();
     await shot(mgr, '50-campaign-gap');
     await relax.getByRole('button', { name: 'طبّق' }).click();
-    assert.equal(await mgr.getByLabel('أقل عدد أفراد').inputValue(), '2', 'التقريب يغيّر القاعدة الظاهرة');
+    await mgr.getByText('عُدّلت القاعدة: أقل عدد الأفراد من 3 إلى 2').waitFor();
     await waitFinal(6);
     assert.equal(await mgr.getByRole('region', { name: 'إكمال العدد' }).count(), 0);
-    // يُرجَع الحدّ، ويُكمَل هذه المرة بالترشيح.
+    // التقريب غيّر القاعدة نفسها في صفحتها. تُرجَع، ويُكمَل هذه المرة بالترشيح.
+    await page(2, 'من يستفيد');
+    assert.equal(await mgr.getByLabel('أقل عدد أفراد').inputValue(), '2');
     await mgr.getByLabel('أقل عدد أفراد').fill('3');
+    await mgr.getByText('ينقص 1 عن المستهدف: يُكمَل في الصفحة التالية').waitFor();
+    await next();
     await mgr.getByRole('heading', { name: 'ينقص 1 عن العدد المستهدف (6)' }).waitFor();
     await mgr.getByRole('button', { name: 'اقبل أول 1' }).waitFor();
     await mgr.locator(`[data-nominee="${fams[1].familyNo}"]`).getByRole('button', { name: 'رشّحها' }).click();
     await waitFinal(6);
     await mgr.locator('tbody tr', { hasText: fams[1].familyNo }).getByText('بالترشيح').waitFor();
-    // تُخرَج المرشَّحة ويعود العدد إلى ما كان، ليمضي الاختبار على ثلاث.
+    // تُخرَج المرشَّحة ويعود العدد إلى ثلاث، ليمضي الاختبار عليها.
     await mgr.locator('tbody tr', { hasText: fams[1].familyNo }).getByRole('button', { name: 'استثنِ' }).click();
+    await page(1, 'الأساس');
     await mgr.getByLabel('كم عائلة تستهدف؟').fill('3');
     await waitFinal(3);
+    await page(3, 'العوائل');
   });
 
   await step('اليدوي: استثناء عائلة من القائمة، وإضافة أخرى برقمها، ورفض من لا وجود له', async () => {
@@ -89,20 +119,36 @@ run(async ({ step, shot, newPage }) => {
     await mgr.getByLabel('أضف عائلة برقمها').fill('9999999');
     await mgr.getByRole('button', { name: 'أضف العائلة' }).click();
     await mgr.getByText('لا عائلة معتمدة بهذا الرقم').waitFor();
-    await mgr.waitForFunction(() => document.querySelector('button[disabled]')?.textContent?.includes('أنشئ المسودة') || [...document.querySelectorAll('button')].some((b) => b.textContent === 'أنشئ المسودة' && b.disabled));
+    // صفحة فيها مضافة لا تدخل الحملة لا تُتجاوز.
+    await mgr.getByText('في المضافة باليد عائلة لا تدخل الحملة').waitFor();
+    assert.equal(await mgr.getByRole('button', { name: 'التالي' }).isDisabled(), true);
     await mgr.getByRole('button', { name: 'أزلها' }).click();
-    await mgr.waitForFunction(() => document.querySelector('[data-testid=final]')?.textContent === '4');
+    await waitFinal(4);
     await shot(mgr, '44-campaign-new');
+  });
+
+  await step('نقاط التوزيع ثم المراجعة: كل ما اختير في صفحة واحدة، ثم تُنشأ المسودة', async () => {
+    await next();
+    await mgr.getByText('اختر نقطة توزيع أو متعهداً').waitFor();
+    assert.equal(await mgr.getByRole('button', { name: 'التالي' }).isDisabled(), true);
+    await mgr.getByLabel('الجامع الكبير', { exact: true }).check();
+    await mgr.getByText(/4 عائلة على 1 جهة/).waitFor();
+    await next();
+    await mgr.getByRole('heading', { name: 'راجع قبل الحفظ' }).waitFor();
+    const main = mgr.getByRole('main');
+    await main.getByText('أضاحي العيد', { exact: true }).waitFor();
+    await main.getByText('4 عائلة · 10 كغم', { exact: true }).waitFor();
+    await main.getByText('الجامع الكبير', { exact: true }).waitFor();
+    await main.getByText(/الأفراد 3 إلى ما فوق · المستهدف 3 عائلة، الأعلى نقاطاً أولاً · أُضيفت باليد: 1 · استُثنيت باليد: 1/).waitFor();
+    await shot(mgr, '55-wizard-review');
     await mgr.getByRole('button', { name: 'أنشئ المسودة' }).click();
+    await mgr.getByText('أُنشئت مسودة الحملة').waitFor();
     await mgr.getByRole('heading', { name: 'أضاحي العيد' }).waitFor();
     campaignUrl = mgr.url();
   });
 
   await step('صفحة الحملة تحفظ كيف اختيرت عوائلها، والمسودة تُعدَّل باليد', async () => {
-    await mgr.getByText('الأفراد 3 إلى ما فوق').waitFor();
-    await mgr.getByText('المستهدف 3 عائلة، الأعلى نقاطاً أولاً').waitFor();
-    await mgr.getByText('أُضيفت باليد: 1').waitFor();
-    await mgr.getByText('استُثنيت باليد: 1').waitFor();
+    await mgr.getByText(/الأفراد 3 إلى ما فوق · المستهدف 3 عائلة، الأعلى نقاطاً أولاً · أُضيفت باليد: 1 · استُثنيت باليد: 1/).waitFor();
     await mgr.getByText('1–4 من 4').waitFor();
     await mgr.locator('tr', { hasText: fams[0].familyNo }).getByRole('button', { name: 'احذف' }).click();
     await mgr.getByRole('dialog').getByRole('textbox').fill('انتقلت إلى محافظة أخرى');
@@ -114,6 +160,29 @@ run(async ({ step, shot, newPage }) => {
     await mgr.getByText(`أُضيفت العائلة ${fams[1].familyNo}`).waitFor();
     await mgr.getByText('1–4 من 4').waitFor();
     await shot(mgr, '45-campaign-draft');
+  });
+
+  await step('تعديل المسودة يفتح الصفحات نفسها بما فيها، ومعه ما عُدّل باليد', async () => {
+    await mgr.getByRole('link', { name: 'عدّل الحملة' }).click();
+    assert.match(mgr.url(), /\/edit\/basics$/);
+    await mgr.getByRole('heading', { name: 'تعديل مسودة: أضاحي العيد' }).waitFor();
+    assert.equal(await mgr.getByLabel('اسم الحملة').inputValue(), 'أضاحي العيد');
+    assert.equal(await mgr.getByLabel('كم عائلة تستهدف؟').inputValue(), '3');
+    await mgr.getByLabel('اسم الحملة').fill('أضاحي العيد الكبير');
+    await waitFinal(4);
+    await next();
+    assert.equal(await mgr.getByLabel('أقل عدد أفراد').inputValue(), '3');
+    await next();
+    // ما أُضيف وحُذف باليد في صفحة المسودة عاد هنا: الثانية مضافة، والأولى مستثناة.
+    await mgr.locator('tbody tr', { hasText: fams[1].familyNo }).getByText('باليد').waitFor();
+    await mgr.getByRole('button', { name: `${fams[0].familyNo} · أرجِعها` }).waitFor();
+    await next();
+    assert.equal(await mgr.getByLabel('الجامع الكبير', { exact: true }).isChecked(), true);
+    await next();
+    await mgr.getByRole('button', { name: 'احفظ التعديل' }).click();
+    await mgr.getByText('حُفظ تعديل المسودة').waitFor();
+    await mgr.getByRole('heading', { name: 'أضاحي العيد الكبير' }).waitFor();
+    await mgr.getByText('1–4 من 4').waitFor();
   });
 
   await step('بعد الاعتماد: لا تعديل، والدعوة خرجت لكل عائلة، وتسليم واحد يظهر في الكشف', async () => {
