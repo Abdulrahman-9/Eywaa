@@ -97,7 +97,7 @@ export function Cashbox() {
           </div>
         )} />
 
-      <section aria-label="مؤشرات مالية" className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-4">
+      <section aria-label="مؤشرات مالية" className="grid grid-cols-2 md:grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-4">
         <Stat label="نقد الصناديق كلها" value={s.funds.reduce((a, x) => a + x.cash, 0)} />
         <Stat label="قُبض هذا الشهر" value={s.receivedThisMonth} />
         <Stat label="صُرف هذا الشهر" value={s.spentThisMonth} />

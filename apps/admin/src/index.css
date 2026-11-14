@@ -28,6 +28,14 @@
   --color-danger-soft: #fbe6e4;
 }
 
+/*
+ * كل حاوية تمرير أفقي مرجعٌ لما في داخلها من عناصر مطلقة الموضع (كالنص المخفيّ لقارئ الشاشة في رأس عمود).
+ * بغير هذا لا تقصّها الحاوية، فتخرج منها وتوسّع الصفحة كلها: على الهاتف تصير الصفحة ضعف عرض الشاشة ويغيب زر القائمة.
+ */
+@layer base {
+  .overflow-x-auto { position: relative; }
+}
+
 html {
   font-family: var(--font-sans);
   background: var(--color-ground);

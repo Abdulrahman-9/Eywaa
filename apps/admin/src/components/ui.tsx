@@ -52,7 +52,7 @@ export const Input = ({ ref, ...props }: InputHTMLAttributes<HTMLInputElement> &
 export const Select = (props: SelectHTMLAttributes<HTMLSelectElement>) => <select {...props} className={cn(CONTROL, props.className)} />;
 
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <section className={cn('rounded-xl border border-line bg-surface p-5 shadow-[0_1px_2px_rgba(16,35,30,0.04)]', className)}>{children}</section>;
+  return <section className={cn('min-w-0 rounded-xl border border-line bg-surface p-5 shadow-[0_1px_2px_rgba(16,35,30,0.04)]', className)}>{children}</section>;
 }
 
 type Tone = 'ok' | 'warn' | 'info' | 'danger' | 'neutral';

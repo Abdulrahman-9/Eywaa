@@ -43,7 +43,7 @@ export function Home() {
       <PageHeader title="الرئيسية" description={formatLongDate(new Date())} />
       {error && <Alert>{error.message}</Alert>}
 
-      <section aria-label="المؤشرات" className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-4">
+      <section aria-label="المؤشرات" className="grid grid-cols-2 md:grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-4">
         <Stat label="العوائل المعتمدة" value={data?.families.approved} note={data && `${formatNumber(data.approvedPersons)} فرداً`} />
         <Stat label="بانتظار الاعتماد" value={data?.families.pendingApproval} />
         <Stat label="معلَّقة لشبهة تكرار" value={data?.families.pendingDedupeReview} note={data && `${formatNumber(data.openDuplicateFlags)} شبهة مفتوحة`} />

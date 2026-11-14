@@ -153,7 +153,7 @@ export function VisitsTodo() {
           <li key={r.id} className="flex flex-wrap items-baseline gap-x-3 border-b border-line py-2 last:border-0">
             <Link to={`/families/${r.familyId}`} className="font-semibold text-brand-strong underline">{r.headName ?? r.familyNo}</Link>
             <span className="text-sm tabular-nums text-muted">{r.familyNo}{r.mahalla && ` · ${r.mahalla}`}</span>
-            <span className="min-w-0 flex-1 text-sm">{r.reason}</span>
+            <span className="min-w-0 flex-[1_1_12rem] text-sm">{r.reason}</span>
           </li>
         ))}
       </ul>

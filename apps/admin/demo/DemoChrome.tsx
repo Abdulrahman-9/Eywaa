@@ -113,14 +113,17 @@ export function DemoChrome({ children }: { children: ReactNode }) {
     <>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-nav px-4 py-2 text-sm text-nav-ink" data-testid="demo-ribbon">
         <span className="rounded-full bg-warm px-2.5 py-0.5 font-bold text-white">نسخة للتجربة</span>
-        <span>بيانات وهمية لمركز افتراضي. دخلتَ بصفة <strong>مدير النظام</strong>. ما تغيّره لا يُحفظ.</span>
+        <span className="hidden sm:inline">بيانات وهمية لمركز افتراضي. دخلتَ بصفة <strong>مدير النظام</strong>. ما تغيّره لا يُحفظ.</span>
+        <span className="sm:hidden">بيانات وهمية، ولا يُحفظ التغيير.</span>
         <button type="button" onClick={() => setOpen(true)} className="ms-auto min-h-9 font-bold underline underline-offset-4">اكتب ملاحظة{mine.length ? ` (${mine.length})` : ''}</button>
       </div>
       {children}
       <button type="button" onClick={() => setOpen(true)} aria-label="اكتب ملاحظة على هذه الشاشة"
-        className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-[calc(1rem+env(safe-area-inset-left,0px))] z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-brand px-5 font-bold text-white shadow-[0_8px_24px_-6px_rgba(11,85,72,0.55)] transition-transform hover:bg-brand-strong active:scale-95">
-        <MessageSquarePlus aria-hidden="true" className="size-5" />اكتب ملاحظة
+        className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-[calc(1rem+env(safe-area-inset-left,0px))] z-30 inline-flex size-14 items-center justify-center gap-2 rounded-full bg-brand font-bold text-white shadow-[0_8px_24px_-6px_rgba(11,85,72,0.55)] transition-transform hover:bg-brand-strong active:scale-95 sm:size-auto sm:min-h-12 sm:px-5">
+        <MessageSquarePlus aria-hidden="true" className="size-6 sm:size-5" /><span className="hidden sm:inline">اكتب ملاحظة</span>
       </button>
+      {/* فسحة آخر الصفحة على الهاتف: ليُمرَّر ما تحت الزر العائم إلى ما فوقه. */}
+      <div aria-hidden="true" className="h-20 sm:hidden" />
 
       <Dialog open={open} wide title="ملاحظتك على النظام" onClose={() => { setOpen(false); setSaved(null); }}>
         <p className="text-muted">تُكتب الملاحظة على الشاشة التي أنت فيها: <strong className="text-ink">{screen}</strong>. اكتب ما رأيت، وما كنت تنتظر أن ترى.</p>

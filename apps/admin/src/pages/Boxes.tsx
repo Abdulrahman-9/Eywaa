@@ -101,7 +101,7 @@ function BoxDialog({ id, canBook, agents, funds, onClose }: { id: string | null;
               {b.status === 'RETIRED' ? <Badge>مرفوع من موقعه{b.retireNote ? `: ${b.retireNote}` : ''}</Badge> : b.stale ? <Badge tone="warn">لم يُفتح منذ {formatDays(b.daysSince)}</Badge> : <Badge tone="ok">عامل</Badge>}
               <Badge tone="info">يدخل «{b.fund}»</Badge>
             </div>
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-3">
               {fact(<MapPin aria-hidden="true" className="size-4" />, 'الموقع', <>{b.location}{b.address && <div className="font-normal text-muted">{b.address}</div>}</>)}
               {fact(<Store aria-hidden="true" className="size-4" />, 'صاحب الموقع', b.hostName ? <>{b.hostName}{b.hostPhone && <div className="font-normal"><bdi dir="ltr">{b.hostPhone}</bdi></div>}</> : 'لم يُذكر')}
               {fact(<User aria-hidden="true" className="size-4" />, 'المتعهد المحصِّل', b.agentName ?? 'لا متعهد له')}

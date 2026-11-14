@@ -112,7 +112,7 @@ export function Campaign() {
       {c.status === 'PENDING_APPROVAL' && mine && <Alert tone="warn"><strong>هذه الحملة أنشأتَها أنت.</strong> يعتمدها مدير توزيع آخر أو مدير النظام، وعندها تصدر الرموز.</Alert>}
       {(c.status === 'REJECTED' || c.status === 'CANCELLED') && <Alert><strong>{CAMPAIGN_STATUS[c.status][0]}.</strong> {c.decisionNote}</Alert>}
 
-      <section aria-label="مؤشرات الحملة" className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-4">
+      <section aria-label="مؤشرات الحملة" className="grid grid-cols-2 md:grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-4">
         <Stat label="المستحقون" value={c.totals.families} note={`${formatNumber(c.totals.quantity)} ${c.unit}`} />
         <Stat label="سُلِّم" value={c.totals.delivered} note={`${pct}% · ${formatNumber(c.totals.deliveredQuantity)} ${c.unit}`} />
         <Stat label={c.status === 'CLOSED' ? 'لم يستلم' : 'بقي'} value={left} />
