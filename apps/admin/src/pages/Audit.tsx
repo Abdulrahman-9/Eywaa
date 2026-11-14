@@ -66,6 +66,8 @@ const ACTIONS: Record<string, string> = {
   'housing.verify': 'زيارة تحقق',
   'housing.send_back': 'إعادة مرحلة إلى المتعهد',
   'housing.pay': 'صرف دفعة مرحلة',
+  'donor.create': 'إضافة متبرع',
+  'report.export': 'تنزيل تقرير',
   'program.create': 'إنشاء برنامج',
   'program.update': 'تعديل برنامج',
   'scoring.propose': 'اقتراح إصدار للنقاط',

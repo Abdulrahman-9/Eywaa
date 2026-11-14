@@ -38,6 +38,7 @@ export const NAV: NavItem[] = [
   { to: '/warehouse', label: 'المخازن', roles: ['ADMIN', 'STOREKEEPER', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'AUDITOR'], icon: 'M3 9l9-6 9 6v11H3zM9 20v-6h6v6' },
   { to: '/cashbox', label: 'الصندوق والمحاسبة', roles: ['ADMIN', 'ACCOUNTANT', 'DISTRIBUTION_MANAGER', 'AUDITOR'], icon: 'M3 7h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3zM3 7V6a2 2 0 0 1 2-2h11M16 13h2' },
   { to: '/housing', label: 'بناء المنازل', roles: ['ADMIN', 'PROJECT_SUPERVISOR', 'ACCOUNTANT', 'AUDITOR'], icon: 'M4 21V10l8-6 8 6v11M9 21v-6h6v6' },
+  { to: '/reports', label: 'المتبرعون والتقارير', roles: ['ADMIN', 'ACCOUNTANT', 'DISTRIBUTION_MANAGER', 'BENEFICIARY_SUPERVISOR', 'AUDITOR'], icon: 'M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.6-7 10-7 10z' },
   { to: '/users', label: 'المستخدمون', roles: ['ADMIN'], icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1' },
   { to: '/audit', label: 'سجل التدقيق', roles: ['ADMIN', 'AUDITOR'], icon: 'M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6zM9 12l2 2 4-4' },
   { to: '/settings', label: 'الإعدادات', roles: 'ALL', icon: 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M16 4v4M10 10v4M18 16v4' },

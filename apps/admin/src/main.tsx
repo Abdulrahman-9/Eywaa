@@ -11,7 +11,8 @@ import { AuthProvider } from './lib/auth';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      // نظام يعمل فيه عدة موظفين معاً: كل شاشة تجلب الجديد عند فتحها، ولا تعرض ما حفظته.
+      staleTime: 0,
       // أخطاء الصلاحية والطلب لا تنفع إعادتها؛ تُعاد أخطاء الشبكة والخادم فقط.
       retry: (count, error) => count < 2 && !(error instanceof ApiError && error.status >= 400 && error.status < 500),
     },

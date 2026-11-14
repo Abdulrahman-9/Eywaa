@@ -60,3 +60,25 @@ export async function upload<T>(path: string, form: FormData): Promise<T> {
   }
   return data as T;
 }
+
+/** ينزّل ملفاً يحتاج جلسة (كالتقارير): يُجلب بالرمز ثم يُحفظ من المتصفح. */
+export async function download(path: string, fallbackName: string): Promise<void> {
+  const token = tokenStore.get();
+  const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized();
+    const data = await res.json().catch(() => null);
+    throw new ApiError(res.status, (data && typeof data.message === 'string' && data.message) || 'تعذّر تنزيل التقرير');
+  }
+  const header = res.headers.get('content-disposition') ?? '';
+  const match = /filename\*=UTF-8''([^;]+)/.exec(header);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = match ? decodeURIComponent(match[1]) : fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // يُحرَّر الرابط بعد أن يبدأ المتصفح التنزيل، لا قبله.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}

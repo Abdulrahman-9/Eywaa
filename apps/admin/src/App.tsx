@@ -13,6 +13,7 @@ import { Family } from './pages/Family';
 import { Notify } from './pages/Notify';
 import { Programs } from './pages/Programs';
 import { Register } from './pages/Register';
+import { Reports } from './pages/Reports';
 import { Review } from './pages/Review';
 import { Scoring } from './pages/Scoring';
 import { Housing, HousingProject } from './pages/Housing';
@@ -34,7 +35,7 @@ function Message({ title, body }: { title: string; body: string }) {
 }
 
 const PAGES: Record<string, () => React.JSX.Element> = {
-  '/': Home, '/families': Families, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/campaigns': Campaigns, '/desk': Desk, '/notify': Notify, '/warehouse': Warehouse, '/cashbox': Cashbox, '/housing': Housing, '/users': Users, '/audit': Audit, '/settings': Settings,
+  '/': Home, '/families': Families, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/campaigns': Campaigns, '/desk': Desk, '/notify': Notify, '/warehouse': Warehouse, '/cashbox': Cashbox, '/housing': Housing, '/reports': Reports, '/users': Users, '/audit': Audit, '/settings': Settings,
 };
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 const FORBIDDEN = <Message title="لا صلاحية لك في هذه الصفحة" body="هذه الصفحة ليست من عمل دورك. إن رأيت أنك تحتاجها فراجع مدير النظام." />;

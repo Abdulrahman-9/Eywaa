@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatDateTime, formatNumber } from '../lib/format';
 import type { Program } from './Programs';
+import type { Donor } from './Reports';
 
 export interface Fund { id: string; name: string; note: string | null; programId: string | null; program: string | null; cash: number; custody: number; reserved: number; available: number }
 interface Summary { funds: Fund[]; receivedThisMonth: number; spentThisMonth: number; pendingEntries: number }
@@ -33,19 +34,20 @@ export function Cashbox() {
   const trial = useQuery({ queryKey: ['accounting', 'trial'], queryFn: () => api<Trial>('/accounting/trial-balance') });
   const programs = useQuery({ queryKey: ['programs'], queryFn: () => api<Program[]>('/programs'), enabled: canBook });
   const cashiers = useQuery({ queryKey: ['users', 'DISTRIBUTOR'], queryFn: () => api<{ id: string; fullName: string; username: string }[]>('/users/brief?role=DISTRIBUTOR'), enabled: canBook });
+  const donors = useQuery({ queryKey: ['donors'], queryFn: () => api<Donor[]>('/donors'), enabled: canBook, retry: false });
   const [form, setForm] = useState<Form>(null);
-  const [f, setF] = useState({ fundId: '', amount: '', party: '', description: '', category: '', name: '', programId: '', userId: '' });
+  const [f, setF] = useState({ fundId: '', amount: '', party: '', description: '', category: '', name: '', programId: '', userId: '', donorId: '' });
   const [deciding, setDeciding] = useState<{ entry: Entry; approve: boolean } | null>(null);
   const [reversing, setReversing] = useState<Entry | null>(null);
   const [closing, setClosing] = useState<Custody | null>(null);
   const [counted, setCounted] = useState('');
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['accounting'] });
-  const close = () => { setForm(null); setF({ fundId: '', amount: '', party: '', description: '', category: '', name: '', programId: '', userId: '' }); };
+  const close = () => { setForm(null); setF({ fundId: '', amount: '', party: '', description: '', category: '', name: '', programId: '', userId: '', donorId: '' }); };
 
   const save = useMutation({
     mutationFn: () => {
       const base = { fundId: f.fundId, amount: int(f.amount) };
-      if (form === 'receipt') return api<{ no: string }>('/accounting/receipts', { method: 'POST', body: { ...base, party: f.party.trim(), description: f.description.trim() } });
+      if (form === 'receipt') return api<{ no: string }>('/accounting/receipts', { method: 'POST', body: { ...base, description: f.description.trim(), ...(f.donorId ? { donorId: f.donorId } : { party: f.party.trim() }) } });
       if (form === 'payment') return api<{ no: string }>('/accounting/payments', { method: 'POST', body: { ...base, party: f.party.trim(), description: f.description.trim(), category: f.category.trim() } });
       if (form === 'custody') return api<{ no: string }>('/accounting/custody/issue', { method: 'POST', body: { ...base, userId: f.userId } });
       return api<{ no?: string }>('/accounting/funds', { method: 'POST', body: { name: f.name.trim(), programId: f.programId || null } });
@@ -74,7 +76,7 @@ export function Cashbox() {
   );
   const diff = closing ? int(counted) - closing.balance : 0;
   const formOk = form === 'fund' ? f.name.trim().length >= 2
-    : !!f.fundId && int(f.amount) > 0 && (form === 'custody' ? !!f.userId : f.party.trim().length >= 2 && f.description.trim().length >= 2 && (form !== 'payment' || f.category.trim().length >= 2));
+    : !!f.fundId && int(f.amount) > 0 && (form === 'custody' ? !!f.userId : (f.party.trim().length >= 2 || (form === 'receipt' && !!f.donorId)) && f.description.trim().length >= 2 && (form !== 'payment' || f.category.trim().length >= 2));
 
   return (
     <>
@@ -190,7 +192,10 @@ export function Cashbox() {
               <Field label="أمين الصندوق">{(id) => <Select id={id} value={f.userId} onChange={(e) => setF({ ...f, userId: e.target.value })}><option value="">اختر موظف التوزيع</option>{cashiers.data?.map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}</Select>}</Field>
             ) : (
               <>
-                <Field label={form === 'receipt' ? 'من' : 'إلى'}>{(id) => <Input id={id} value={f.party} onChange={(e) => setF({ ...f, party: e.target.value })} />}</Field>
+                {form === 'receipt' && donors.data && donors.data.length > 0 && (
+                  <Field label="المتبرع" hint="اختره ليدخل التبرع في تقريره">{(id) => <Select id={id} value={f.donorId} onChange={(e) => setF({ ...f, donorId: e.target.value })}><option value="">ليس من متبرع مسجَّل</option>{donors.data.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</Select>}</Field>
+                )}
+                {!(form === 'receipt' && f.donorId) && <Field label={form === 'receipt' ? 'من' : 'إلى'}>{(id) => <Input id={id} value={f.party} onChange={(e) => setF({ ...f, party: e.target.value })} />}</Field>}
                 <Field label="البيان">{(id) => <Input id={id} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />}</Field>
                 {form === 'payment' && <Field label="باب الصرف" hint="مشتريات، مصاريف إدارية، نقل…">{(id) => <Input id={id} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} />}</Field>}
               </>

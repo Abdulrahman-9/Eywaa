@@ -15,6 +15,7 @@ export const moveSchema = z.object({
   quantity: qty,
   expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   source: z.string().trim().min(1).max(120).optional(),
+  donorId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   note: z.string().trim().min(1).max(300).optional(),
 });
@@ -85,9 +86,9 @@ export class InventoryService {
         if (have < input.quantity) throw new ConflictException(`الرصيد لا يكفي: في المخزن ${have} والمطلوب ${input.quantity}`);
       }
       const { rows } = await c.query(
-        `insert into stock_moves (kind, status, item_id, from_wh, to_wh, quantity, expiry, source, campaign_id, note, created_by)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
-        [input.kind, status, input.itemId, from, to, input.quantity, input.expiry ?? null, input.source ?? null, input.campaignId ?? null, input.note ?? null, actor.id],
+        `insert into stock_moves (kind, status, item_id, from_wh, to_wh, quantity, expiry, source, campaign_id, note, created_by, donor_id)
+         values ($1,$2,$3,$4,$5,$6,$7,coalesce($8, (select name from donors where id = $12)),$9,$10,$11,$12) returning id`,
+        [input.kind, status, input.itemId, from, to, input.quantity, input.expiry ?? null, input.source ?? null, input.campaignId ?? null, input.note ?? null, actor.id, input.kind === 'RECEIPT' ? input.donorId ?? null : null],
       );
       await this.audit.append(c, { actorId: actor.id, action: `stock.${input.kind.toLowerCase()}`, entity: 'stock_move', entityId: rows[0].id, payload: input });
       return { id: rows[0].id as string, status };

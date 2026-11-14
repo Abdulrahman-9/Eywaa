@@ -8,7 +8,8 @@ import { Db } from '../db/db.module';
 const amount = z.number().int().min(1).max(1_000_000_000_000);
 const text = z.string().trim().min(2).max(200);
 export const fundSchema = z.object({ name: z.string().trim().min(2).max(80), programId: z.string().uuid().nullable().optional(), note: z.string().trim().max(200).optional() });
-export const receiptSchema = z.object({ fundId: z.string().uuid(), amount, party: text, description: text });
+export const receiptSchema = z.object({ fundId: z.string().uuid(), amount, party: text.optional(), description: text, donorId: z.string().uuid().optional() })
+  .refine((r) => r.party || r.donorId, 'يلزم ذكر من قُبض منه');
 export const paymentSchema = z.object({ fundId: z.string().uuid(), amount, party: text, description: text, category: z.string().trim().min(2).max(60) });
 export const custodySchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid(), amount });
 export const closeSchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid().optional(), counted: z.number().int().min(0).max(1_000_000_000_000) });
@@ -125,7 +126,14 @@ export class AccountingService {
   receipt(input: z.infer<typeof receiptSchema>, actor: AuthUser) {
     return this.locked(async (c) => {
       await this.fund(c, input.fundId);
-      const e = await this.insert(c, { kind: 'RECEIPT', status: 'POSTED', fundId: input.fundId, amount: input.amount, description: input.description, party: input.party, debit: 'CASH', credit: 'INCOME', actorId: actor.id });
+      let party = input.party ?? null;
+      if (input.donorId) {
+        const d = await c.query('select name from donors where id = $1', [input.donorId]);
+        if (!d.rows[0]) throw new BadRequestException('المتبرع غير موجود');
+        party = d.rows[0].name;
+      }
+      const e = await this.insert(c, { kind: 'RECEIPT', status: 'POSTED', fundId: input.fundId, amount: input.amount, description: input.description, party, debit: 'CASH', credit: 'INCOME', actorId: actor.id });
+      if (input.donorId) await c.query('update ledger_entries set donor_id = $2 where id = $1', [e.id, input.donorId]);
       await this.audit.append(c, { actorId: actor.id, action: 'ledger.receipt', entity: 'ledger_entry', entityId: e.id, payload: { ...input, no: e.no } });
       return { ...e, status: 'POSTED' };
     });

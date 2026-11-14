@@ -14,6 +14,7 @@ import { ChangesService } from './changes/changes.service';
 import { DbModule } from './db/db.module';
 import { DistributionController } from './distribution/distribution.controller';
 import { DistributionService } from './distribution/distribution.service';
+import { DonorsService } from './donors/donors.service';
 import { FamiliesController } from './families/families.controller';
 import { FamiliesService } from './families/families.service';
 import { HousingController } from './housing/housing.controller';
@@ -25,6 +26,8 @@ import { NotificationsController } from './notifications/notifications.controlle
 import { NotificationsService } from './notifications/notifications.service';
 import { ProgramsController } from './programs/programs.controller';
 import { ProgramsService } from './programs/programs.service';
+import { ReportsController } from './reports/reports.controller';
+import { ReportsService } from './reports/reports.service';
 import { ScoringController } from './scoring/scoring.controller';
 import { ScoringService } from './scoring/scoring.service';
 import { SettingsController } from './settings/settings.controller';
@@ -36,10 +39,10 @@ import { UsersController } from './users/users.controller';
   imports: [DbModule],
   controllers: [
     AuthController, UsersController, AuditController, SettingsController, StatsController,
-    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController,
+    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, InventoryService, AccountingService, DistributionService, HousingService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, InventoryService, AccountingService, DistributionService, HousingService, DonorsService, ReportsService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })
