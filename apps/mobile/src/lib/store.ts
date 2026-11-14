@@ -19,11 +19,18 @@ export interface Registration {
   /** صور الوثائق: تُرفع بعد أن يُعطي الخادم العائلة رقمها، ثم تُمحى من الجهاز. */
   photos: { key: string; category: 'IDENTITY' | 'RATION_CARD' | 'PAPER_FORM' | 'OTHER' }[];
 }
-interface Data { token: string | null; user: User | null; station: Station | null; deliveries: Delivery[]; registrations: Registration[] }
+/** زيارة إعادة تقييم مطلوبة من هذا الموظف، كما حُمّلت من الخادم. */
+export interface Visit { id: string; familyNo: string; headName: string | null; phone: string | null; mahalla: string | null; landmark: string | null; reason: string; source: 'FAMILY' | 'STAFF' }
+export interface VisitReport {
+  clientOpId: string; reassessmentId: string; familyNo: string; headName: string | null; findings: string; outcome: 'NO_CHANGE' | 'CHANGED'; visitedAt: string;
+  sync: 'PENDING' | 'SYNCED' | 'REJECTED'; error?: string;
+}
+interface Data { token: string | null; user: User | null; station: Station | null; deliveries: Delivery[]; registrations: Registration[]; visits: Visit[]; visitReports: VisitReport[] }
 
 export interface AppState extends Data { meta: Meta | null; unlocked: boolean; manifest: Manifest | null; online: boolean; syncing: boolean; lastSync: string | null; needLogin: boolean; revoked: boolean }
 
-const EMPTY: Data = { token: null, user: null, station: null, deliveries: [], registrations: [] };
+const EMPTY: Data = { token: null, user: null, station: null, deliveries: [], registrations: [], visits: [], visitReports: [] };
+const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 let state: AppState = { ...EMPTY, meta: null, unlocked: false, manifest: null, online: navigator.onLine, syncing: false, lastSync: null, needLogin: false, revoked: false };
 const listeners = new Set<() => void>();
 const set = (patch: Partial<AppState>) => { state = { ...state, ...patch }; listeners.forEach((l) => l()); };
@@ -32,7 +39,7 @@ export const useApp = () => useSyncExternalStore((l) => { listeners.add(l); retu
 
 /** يكتب البيانات إلى الخزنة. لا يُعدّ شيء محفوظاً حتى يعود هذا الوعد. */
 async function save(patch: Partial<Data>) {
-  const next: Data = { token: state.token, user: state.user, station: state.station, deliveries: state.deliveries, registrations: state.registrations, ...patch };
+  const next: Data = { token: state.token, user: state.user, station: state.station, deliveries: state.deliveries, registrations: state.registrations, visits: state.visits, visitReports: state.visitReports, ...patch };
   await vault.put('data', next);
   set(next);
 }
@@ -64,7 +71,7 @@ export const app = {
   async unlock(pin: string) {
     const r = await vault.unlock(pin);
     if (!r.ok) { set({ meta: (await vault.meta()) ?? null }); return r; }
-    const data = (await vault.get<Data>('data')) ?? EMPTY;
+    const data = { ...EMPTY, ...((await vault.get<Data>('data')) ?? {}) };
     set({ ...data, manifest: (await vault.get<Manifest>('manifest')) ?? null, unlocked: true, meta: (await vault.meta()) ?? null });
     return r;
   },
@@ -121,6 +128,13 @@ export const app = {
     const r = state.registrations.find((x) => x.clientOpId === clientOpId);
     await save({ registrations: state.registrations.filter((x) => x.clientOpId !== clientOpId) });
     for (const p of r?.photos ?? []) await vault.delBytes(p.key);
+  },
+
+  async addVisitReport(r: VisitReport) {
+    await save({ visitReports: [...state.visitReports, r] });
+  },
+  async dropVisitReport(clientOpId: string) {
+    await save({ visitReports: state.visitReports.filter((r) => r.clientOpId !== clientOpId) });
   },
 
   /**
@@ -186,6 +200,21 @@ export const app = {
           await vault.delBytes(photo.key);
         }
       }
+      for (const r of state.visitReports.filter((x) => x.sync === 'PENDING')) {
+        let patch: Partial<VisitReport>;
+        try {
+          await api(`/reassessments/${r.reassessmentId}/visit`, { token, timeoutMs: 30_000, body: { findings: r.findings, outcome: r.outcome, visitedAt: r.visitedAt, clientOpId: r.clientOpId } });
+          patch = { sync: 'SYNCED', error: undefined };
+        } catch (err) {
+          if (!(err instanceof ApiError) || err.offline || err.status === 401 || err.status >= 500) throw err;
+          patch = { sync: 'REJECTED', error: err.message };
+        }
+        await save({ visitReports: state.visitReports.map((x) => (x.clientOpId === r.clientOpId ? { ...x, ...patch } : x)) });
+      }
+      if (state.user && REGISTRARS.includes(state.user.role)) {
+        const visits = await api<Visit[]>('/reassessments?mine=true', { token, timeoutMs: 30_000 });
+        await save({ visits: visits.map((v) => ({ id: v.id, familyNo: v.familyNo, headName: v.headName, phone: v.phone, mahalla: v.mahalla, landmark: v.landmark, reason: v.reason, source: v.source })) });
+      }
       if (state.station) {
         try {
           const s = state.station;
@@ -211,4 +240,5 @@ export const app = {
 };
 
 export const pendingCount = (s: AppState) =>
-  s.deliveries.filter((d) => d.sync === 'PENDING' || (d.photo === 'PENDING')).length + s.registrations.filter((r) => r.sync === 'PENDING' || (r.sync === 'SYNCED' && r.photos.length > 0)).length;
+  s.deliveries.filter((d) => d.sync === 'PENDING' || (d.photo === 'PENDING')).length + s.registrations.filter((r) => r.sync === 'PENDING' || (r.sync === 'SYNCED' && r.photos.length > 0)).length
+  + s.visitReports.filter((r) => r.sync === 'PENDING').length;

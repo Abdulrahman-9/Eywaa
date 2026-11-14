@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { app, pendingCount, useApp } from '../lib/store';
 import { Button, Notice, Screen, formatTime } from '../ui';
 
-export type Route = 'home' | 'station' | 'deliver' | 'day' | 'register' | 'outbox' | 'relogin';
+export type Route = 'home' | 'station' | 'deliver' | 'day' | 'register' | 'outbox' | 'relogin' | 'visits';
 const DESK = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR'];
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 
@@ -19,7 +19,7 @@ export function Home({ go }: { go: (r: Route) => void }) {
   const s = useApp();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const pending = pendingCount(s);
-  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN').length + s.registrations.filter((r) => r.sync === 'REJECTED').length;
+  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN').length + s.registrations.filter((r) => r.sync === 'REJECTED').length + s.visitReports.filter((r) => r.sync === 'REJECTED').length;
   const role = s.user?.role ?? '';
   const delivered = s.station ? s.deliveries.filter((d) => d.sync !== 'UNKNOWN').length : 0;
   const remaining = s.manifest ? s.manifest.entries.filter((e) => e.status === 'PENDING' && !s.deliveries.some((d) => d.entitlementId === e.id)).length : 0;
@@ -80,6 +80,14 @@ export function Home({ go }: { go: (r: Route) => void }) {
           <p className="text-muted">يُحفظ على الجهاز ويُرفع حين يتصل. كشف التكرار يقع عند الرفع.</p>
           <Button onClick={() => go('register')}>سجّل عائلة</Button>
           {s.registrations.length > 0 && <Button variant="secondary" onClick={() => go('outbox')}>ما سجّلتَه ({s.registrations.length})</Button>}
+        </section>
+      )}
+
+      {REGISTRARS.includes(role) && (
+        <section aria-label="إعادة التقييم" className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
+          <h2 className="text-lg font-bold">زيارات إعادة التقييم</h2>
+          <p className="text-muted">ما طُلب منك زيارته. القائمة تتجدد عند كل مزامنة.</p>
+          <Button variant={s.visits.filter((v) => !s.visitReports.some((r) => r.reassessmentId === v.id)).length ? 'primary' : 'secondary'} onClick={() => go('visits')}>الزيارات المطلوبة ({s.visits.filter((v) => !s.visitReports.some((r) => r.reassessmentId === v.id)).length})</Button>
         </section>
       )}
 

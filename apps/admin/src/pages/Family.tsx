@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Attachments } from '../components/Attachments';
 import { ChangeDialog } from '../components/ChangeDialog';
+import { FamilyReassessments } from '../components/Reassessments';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Skeleton } from '../components/ui';
@@ -219,6 +220,7 @@ export function Family() {
         </div>
       </div>
 
+      {user && ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'AUDITOR'].includes(user.role) && f.status === 'APPROVED' && <FamilyReassessments familyId={f.id} familyNo={f.familyNo} approved />}
       <ReasonDialog open={dialog === 'approve'} title={`اعتماد العائلة ${f.familyNo}`} confirmLabel="اعتماد" required={false}
         pending={decide.isPending} error={decide.error?.message} onClose={() => { decide.reset(); setDialog(null); }}
         onConfirm={(note) => decide.mutate({ verb: 'approve', note })}>

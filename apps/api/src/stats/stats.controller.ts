@@ -20,6 +20,7 @@ export class StatsController {
            where f.status = 'APPROVED' and p.status = 'ACTIVE')::int as persons,
         (select count(*) from duplicate_flags where status = 'OPEN')::int as open_flags,
         (select count(*) from change_requests where status = 'PENDING')::int as pending_changes,
+        (select count(*) from reassessments where status = 'VISITED')::int as visited_reassessments,
         (select value from settings where key = 'poverty_line_iqd') as poverty_line,
         (select coalesce(jsonb_object_agg(class, n), '{}') from (select class, count(*) as n from family_scores group by class) c) as classes
     `);
@@ -32,6 +33,7 @@ export class StatsController {
       approvedPersons: r.persons,
       openDuplicateFlags: r.open_flags,
       pendingChangeRequests: r.pending_changes,
+      visitedReassessments: r.visited_reassessments,
       povertyLineIqd: r.poverty_line,
       classes: { A: 0, B: 0, C: 0, D: 0, ...r.classes },
     };

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { ReassessmentActions, ReassessmentSummary, type Reassessment } from '../components/Reassessments';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, PageHeader, Skeleton } from '../components/ui';
@@ -10,7 +11,7 @@ import { formatDate, formatDateTime } from '../lib/format';
 import { CHANGE_TYPES, DOC_TYPES, RELATIONS, fieldLabel, HOUSING } from '../lib/labels';
 import type { ChangeRequest, Family, FamilyRow, OpenFlag } from '../lib/types';
 
-type Tab = 'approvals' | 'flags' | 'changes';
+type Tab = 'approvals' | 'flags' | 'changes' | 'visits';
 
 function Empty({ text }: { text: string }) {
   return <Card className="flex flex-col items-center gap-2 py-10 text-center"><strong className="text-lg">لا شيء ينتظر قرارك</strong><span className="text-muted">{text}</span></Card>;
@@ -119,6 +120,8 @@ export function Review() {
   const approvals = useQuery({ queryKey: ['families', 'pending'], queryFn: () => api<FamilyRow[]>('/families?status=PENDING_APPROVAL&limit=200') });
   const flags = useQuery({ queryKey: ['flags'], queryFn: () => api<OpenFlag[]>('/duplicate-flags') });
   const changes = useQuery({ queryKey: ['changes', 'pending'], queryFn: () => api<ChangeRequest[]>('/changes?status=PENDING') });
+  const visited = useQuery({ queryKey: ['reassessments', 'visited'], queryFn: () => api<Reassessment[]>('/reassessments?status=VISITED') });
+  const openVisits = useQuery({ queryKey: ['reassessments', 'open'], queryFn: () => api<Reassessment[]>('/reassessments?status=OPEN') });
   const decideChange = useMutation({
     mutationFn: (note: string) => api(`/changes/${deciding!.change.id}/${deciding!.approve ? 'approve' : 'reject'}`, { method: 'POST', body: note ? { note } : {} }),
     onSuccess: () => {
@@ -133,6 +136,7 @@ export function Review() {
     ['approvals', 'اعتماد التسجيل', approvals.data?.length],
     ['flags', 'شبهات التكرار', flags.data?.length],
     ['changes', 'طلبات التعديل', changes.data?.length],
+    ['visits', 'إعادة التقييم', visited.data?.length],
   ];
 
   return (
@@ -215,6 +219,23 @@ export function Review() {
           )
       )}
 
+      {tab === 'visits' && (
+        visited.isPending || openVisits.isPending ? <Skeleton className="h-32 w-full" />
+          : (visited.data?.length ?? 0) + (openVisits.data?.length ?? 0) === 0 ? <Empty text="لا طلبات إعادة تقييم قائمة." />
+          : (
+            <div className="flex flex-col gap-3">
+              {[...(visited.data ?? []), ...(openVisits.data ?? [])].map((r) => (
+                <Card key={r.id} className="flex flex-wrap items-start gap-4">
+                  <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-1">
+                    <Link className="text-lg font-bold text-brand-strong" to={`/families/${r.familyId}`}>{r.headName ?? '—'} · {r.familyNo}</Link>
+                    <ReassessmentSummary r={r} />
+                  </div>
+                  <ReassessmentActions r={r} />
+                </Card>
+              ))}
+            </div>
+          )
+      )}
       <ReasonDialog open={deciding !== null} danger={deciding ? !deciding.approve : false} required={deciding ? !deciding.approve : false}
         title={deciding?.approve ? 'اعتماد التعديل' : 'رفض التعديل'} confirmLabel={deciding?.approve ? 'اعتماد التعديل' : 'رفض التعديل'}
         pending={decideChange.isPending} error={decideChange.error?.message}

@@ -6,6 +6,7 @@ import { Home, type Route } from './screens/Home';
 import { Day, Outbox } from './screens/Lists';
 import { Register } from './screens/Register';
 import { StationSetup } from './screens/Station';
+import { Visits } from './screens/Visits';
 
 const AUTO_LOCK_MS = 5 * 60_000;
 
@@ -43,6 +44,7 @@ export function App() {
     case 'day': return <Day onBack={home} />;
     case 'outbox': return <Outbox onBack={home} />;
     case 'register': return <Register onBack={home} onSaved={() => setRoute('outbox')} />;
+    case 'visits': return <Visits onBack={home} />;
     case 'relogin': return <Relogin onClose={home} />;
     default: return <Home go={setRoute} />;
   }

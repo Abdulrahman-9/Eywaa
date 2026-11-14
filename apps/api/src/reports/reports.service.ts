@@ -75,16 +75,16 @@ export class ReportsService {
   }
 
   /**
-   * ملفات تقادم تقييمها: معتمدة ولم تُمسّ بياناتها (اعتماد أو تعديل معتمَد) منذ مدة.
+   * ملفات تقادم تقييمها: معتمدة ولم تُمسّ بياناتها (اعتماد، أو تعديل معتمَد، أو زيارة إعادة تقييم أُغلقت) منذ مدة.
    * إعادة التقييم عند الطلب، فهذا التقرير يُنبّه ولا يُلزم.
    */
   async stale(months: number) {
     const { rows } = await this.db.query(
       `select f.id, f.family_no, h.full_name, sc.class,
-              greatest(f.decided_at, (select max(r.decided_at) from change_requests r where r.family_id = f.id and r.status = 'APPROVED')) as last_touch
+              greatest(f.decided_at, (select max(r.decided_at) from change_requests r where r.family_id = f.id and r.status = 'APPROVED'), (select max(v.closed_at) from reassessments v where v.family_id = f.id and v.status = 'CLOSED')) as last_touch
        from families f left join persons h on h.family_id = f.id and h.relation = 'HEAD' left join family_scores sc on sc.family_id = f.id
        where f.status = 'APPROVED'
-         and greatest(f.decided_at, (select max(r.decided_at) from change_requests r where r.family_id = f.id and r.status = 'APPROVED')) < now() - make_interval(months => $1)
+         and greatest(f.decided_at, (select max(r.decided_at) from change_requests r where r.family_id = f.id and r.status = 'APPROVED'), (select max(v.closed_at) from reassessments v where v.family_id = f.id and v.status = 'CLOSED')) < now() - make_interval(months => $1)
        order by last_touch limit 500`,
       [months],
     );

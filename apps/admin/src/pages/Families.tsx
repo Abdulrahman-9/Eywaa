@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { VisitsTodo } from '../components/Reassessments';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Skeleton } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -48,6 +49,7 @@ export function Families() {
           </div>
         )}
       />
+      {user && CAN_REGISTER.includes(user.role) && <VisitsTodo />}
       <Card className="flex flex-wrap items-end gap-3">
         <div className="min-w-64 flex-[2]">
           <Field label="بحث">

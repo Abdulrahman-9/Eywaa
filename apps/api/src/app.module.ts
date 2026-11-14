@@ -29,6 +29,8 @@ import { PayoutsController } from './payouts/payouts.controller';
 import { PayoutsService } from './payouts/payouts.service';
 import { ProgramsController } from './programs/programs.controller';
 import { ProgramsService } from './programs/programs.service';
+import { ReassessmentsController } from './reassessments/reassessments.controller';
+import { ReassessmentsService } from './reassessments/reassessments.service';
 import { ReportsController } from './reports/reports.controller';
 import { ReportsService } from './reports/reports.service';
 import { ScoringController } from './scoring/scoring.controller';
@@ -43,10 +45,10 @@ import { UsersController } from './users/users.controller';
   imports: [DbModule],
   controllers: [
     AuthController, UsersController, DevicesController, AuditController, SettingsController, StatsController,
-    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController, PayoutsController,
+    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController, PayoutsController, ReassessmentsController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, MessageWorker, InventoryService, AccountingService, DistributionService, HousingService, DonorsService, ReportsService, PayoutsService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, MessageWorker, InventoryService, AccountingService, DistributionService, HousingService, DonorsService, ReportsService, PayoutsService, ReassessmentsService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

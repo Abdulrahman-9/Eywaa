@@ -403,6 +403,36 @@ async function deliver(page, { token, familyNo, code }, receiver) {
       await field.getByText(/رفضه الخادم/).waitFor({ state: 'detached' });
     });
 
+    await step('زيارة إعادة تقييم: تُحمَّل عند المزامنة، وتُسجَّل بلا شبكة، ثم تبلغ الخادم باسم الباحث', async () => {
+      const req = await call('/reassessments', tokens.supervisor, { familyId: withProxy.id, source: 'FAMILY', reason: 'مرضت ربة الأسرة وتوقف عملها' });
+      assert.ok(req.id, JSON.stringify(req));
+      const gone = await call('/reassessments', tokens.supervisor, { familyId: (await call(`/families?q=${encodeURIComponent('وفاء صالح')}`, tokens.supervisor))[0].id, source: 'STAFF', reason: 'تجربة' });
+      assert.equal(gone.message, 'إعادة التقييم للعوائل المعتمدة وحدها');
+      await field.getByRole('button', { name: 'رجوع' }).click();
+      await field.getByRole('button', { name: 'الزيارات المطلوبة (0)' }).waitFor();
+      await field.getByRole('button', { name: 'زامن الآن' }).click();
+      await field.getByRole('button', { name: 'الزيارات المطلوبة (1)' }).waitFor();
+      await ctx2.setOffline(true);
+      await field.getByRole('button', { name: 'الزيارات المطلوبة (1)' }).click();
+      await field.getByText('مرضت ربة الأسرة وتوقف عملها').waitFor();
+      await shot(field, 'm11-visits');
+      await field.getByRole('button', { name: 'سجّل الزيارة' }).click();
+      assert.equal(await field.getByRole('button', { name: 'احفظ على الجهاز' }).isDisabled(), true);
+      await field.getByLabel('ما وجدتَه في الزيارة').fill('ربة الأسرة طريحة الفراش منذ شهرين، ولا عمل لها الآن.');
+      await field.getByLabel('النتيجة').selectOption('CHANGED');
+      await field.getByRole('button', { name: 'احفظ على الجهاز' }).click();
+      await field.getByText('تنتظر الرفع').waitFor();
+      await field.getByText('لا زيارات مطلوبة منك الآن').waitFor();
+      assert.equal((await call(`/reassessments?familyId=${withProxy.id}`, tokens.supervisor))[0].status, 'OPEN');
+      await ctx2.setOffline(false);
+      await field.getByText('وصلت الخادم، وتنتظر الاعتماد').waitFor({ timeout: 15000 });
+      const [r] = await call(`/reassessments?familyId=${withProxy.id}`, tokens.supervisor);
+      assert.equal(r.status, 'VISITED');
+      assert.equal(r.visitedBy, names.researcher);
+      assert.equal(r.outcome, 'CHANGED');
+      assert.ok(r.findings.includes('طريحة الفراش'));
+    });
+
     await step('لا أخطاء برمجية في المتصفح', async () => { if (errors.length) throw new Error(errors.join('\n')); });
     console.log(`\n${steps.length} خطوات نجحت`);
   } catch (err) {

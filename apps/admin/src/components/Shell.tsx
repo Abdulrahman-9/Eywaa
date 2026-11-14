@@ -12,11 +12,11 @@ export function Shell() {
   const [account, setAccount] = useState(false);
   const overview = useQuery({
     queryKey: ['overview'],
-    queryFn: () => api<{ families: { pendingApproval: number }; openDuplicateFlags: number; pendingChangeRequests: number }>('/stats/overview'),
+    queryFn: () => api<{ families: { pendingApproval: number }; openDuplicateFlags: number; pendingChangeRequests: number; visitedReassessments: number }>('/stats/overview'),
     enabled: !!user,
   });
   if (!user) return null;
-  const waiting = overview.data ? overview.data.families.pendingApproval + overview.data.openDuplicateFlags + overview.data.pendingChangeRequests : 0;
+  const waiting = overview.data ? overview.data.families.pendingApproval + overview.data.openDuplicateFlags + overview.data.pendingChangeRequests + overview.data.visitedReassessments : 0;
   return (
     <div className="flex min-h-screen flex-wrap">
       <nav aria-label="القائمة الرئيسية" className="flex max-w-full flex-[1_1_15rem] flex-col gap-6 bg-nav px-4 py-6 text-nav-ink md:max-w-64 print:hidden">
