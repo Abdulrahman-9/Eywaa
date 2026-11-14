@@ -28,6 +28,8 @@ const ACTIONS: Record<string, string> = {
   'change.request': 'طلب تعديل',
   'change.approve': 'اعتماد تعديل',
   'change.reject': 'رفض تعديل',
+  'program.create': 'إنشاء برنامج',
+  'program.update': 'تعديل برنامج',
   'scoring.propose': 'اقتراح إصدار للنقاط',
   'scoring.approve': 'اعتماد إصدار للنقاط',
   'scoring.reject': 'رفض إصدار للنقاط',

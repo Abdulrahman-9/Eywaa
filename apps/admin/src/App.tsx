@@ -6,6 +6,7 @@ import { NAV, canSee } from './lib/roles';
 import { Audit } from './pages/Audit';
 import { Families } from './pages/Families';
 import { Family } from './pages/Family';
+import { Programs } from './pages/Programs';
 import { Register } from './pages/Register';
 import { Review } from './pages/Review';
 import { Scoring } from './pages/Scoring';
@@ -25,7 +26,7 @@ function Message({ title, body }: { title: string; body: string }) {
 }
 
 const PAGES: Record<string, () => React.JSX.Element> = {
-  '/': Home, '/families': Families, '/review': Review, '/scoring': Scoring, '/users': Users, '/audit': Audit, '/settings': Settings,
+  '/': Home, '/families': Families, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/users': Users, '/audit': Audit, '/settings': Settings,
 };
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
 const FORBIDDEN = <Message title="لا صلاحية لك في هذه الصفحة" body="هذه الصفحة ليست من عمل دورك. إن رأيت أنك تحتاجها فراجع مدير النظام." />;

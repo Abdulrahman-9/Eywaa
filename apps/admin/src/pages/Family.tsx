@@ -28,6 +28,10 @@ export function Family() {
   const [dialog, setDialog] = useState<'approve' | 'reject' | 'change' | null>(null);
   const family = useQuery({ queryKey: ['family', id], queryFn: () => api<FamilyT>(`/families/${id}`) });
   const score = useQuery({ queryKey: ['family', id, 'score'], queryFn: () => api<{ version: number; points: number; class: string; breakdown: ScoreLine[] } | null>(`/families/${id}/score`) });
+  const entitlements = useQuery({
+    queryKey: ['family', id, 'entitlements'],
+    queryFn: () => api<{ programId: string; name: string; unit: string; eligible: boolean; quantity: number; reasons: string[] }[]>(`/families/${id}/entitlements`),
+  });
   const changes = useQuery({ queryKey: ['changes', id], queryFn: () => api<ChangeRequest[]>(`/changes?familyId=${id}`) });
 
   const decide = useMutation({
@@ -136,6 +140,17 @@ export function Family() {
                 ))}
               </ul>
               <p className="border-t border-line pt-2 text-sm text-muted">الفئة {CLASS_AR[score.data.class]}، بالإصدار {score.data.version} من المعادلة.</p>
+            </Card>
+          )}
+          {f.status === 'APPROVED' && entitlements.data && entitlements.data.length > 0 && (
+            <Card className="flex flex-col gap-2.5">
+              <h2 className="text-lg font-bold">يستحق الآن</h2>
+              {entitlements.data.map((e) => (
+                <div key={e.programId} className="flex flex-col gap-0.5">
+                  <div className="flex items-center justify-between gap-3"><span className="font-semibold">{e.name}</span>{e.eligible ? <Badge tone="ok">{formatNumber(e.quantity)} {e.unit}</Badge> : <Badge>غير مستحق</Badge>}</div>
+                  {!e.eligible && <span className="text-sm text-muted">{e.reasons.join('، ')}</span>}
+                </div>
+              ))}
             </Card>
           )}
           <Card className="flex flex-col gap-2">
