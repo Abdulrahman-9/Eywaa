@@ -6,7 +6,7 @@ import { formatDateTime } from '../lib/format';
 import { useToast } from './toast';
 import { Alert, Badge, Button, Card, Dialog, Field, Input } from './ui';
 
-interface Message { id: string; channel: string | null; status: string; text: string; sentAt: string; title: string; kind: string }
+interface Message { id: string; channel: string | null; status: string; text: string; sentAt: string; title: string; kind: string; hasImage: boolean }
 interface Preview { recipients: number; byChannel: Record<string, number>; sample: string | null; smsParts: number; driver: { name: string; live: boolean } }
 
 const CHANNEL: Record<string, string> = { WHATSAPP: 'واتساب', SMS: 'رسالة نصية', VOICE: 'مكالمة', NO_PHONE: 'بلا هاتف' };
@@ -57,7 +57,7 @@ export function FamilyMessages({ familyId, familyNo, hasPhone }: { familyId: str
               <Badge tone={STATUS[m.status]?.[1] ?? 'neutral'}>{STATUS[m.status]?.[0] ?? m.status}</Badge>
               <span className="text-sm text-muted">{m.channel && `${CHANNEL[m.channel]} · `}<bdi>{formatDateTime(m.sentAt)}</bdi></span>
             </div>
-            <span className="text-sm">{m.text}</span>
+            <span className="text-sm">{m.text}{m.hasImage && <strong className="text-brand-strong"> · مع صورة رمز الاستلام</strong>}</span>
           </li>
         ))}
       </ul>

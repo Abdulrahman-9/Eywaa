@@ -6,6 +6,7 @@ import { useAuth } from './lib/auth';
 import { NAV, canSee } from './lib/roles';
 import { Audit } from './pages/Audit';
 import { Campaign } from './pages/Campaign';
+import { CampaignNew } from './pages/CampaignNew';
 import { Campaigns } from './pages/Campaigns';
 import { Cashbox } from './pages/Cashbox';
 import { Desk } from './pages/Desk';
@@ -73,6 +74,7 @@ export function App() {
         <Route path="/families/import" element={['ADMIN', 'BENEFICIARY_SUPERVISOR'].includes(user.role) ? <Import /> : FORBIDDEN} />
         <Route path="/families/new" element={REGISTRARS.includes(user.role) ? <Register /> : FORBIDDEN} />
         <Route path="/families/:id" element={canSee(NAV.find((n) => n.to === '/families')!, user.role) ? <Family /> : FORBIDDEN} />
+        <Route path="/campaigns/new" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <CampaignNew /> : FORBIDDEN} />
         <Route path="/campaigns/:id" element={canSee(NAV.find((n) => n.to === '/campaigns')!, user.role) ? <Campaign /> : FORBIDDEN} />
         <Route path="/campaigns/:id/tokens" element={['ADMIN', 'DISTRIBUTION_MANAGER'].includes(user.role) ? <Tokens /> : FORBIDDEN} />
         <Route path="/housing/:id" element={canSee(NAV.find((n) => n.to === '/housing')!, user.role) ? <HousingProject /> : FORBIDDEN} />

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { CampaignFamilies } from '../components/CampaignFamilies';
 import { PAYOUT_READERS, Payouts } from '../components/Payouts';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
@@ -8,12 +9,37 @@ import { Alert, Badge, Button, Card, Dialog, PageHeader, Skeleton } from '../com
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
+import { ORDER_AR } from './CampaignNew';
 import { CAMPAIGN_STATUS, type CampaignStatus } from './Campaigns';
+import { CLASS_AR } from './Scoring';
+import { TAGS } from '../lib/labels';
 import { ReconcileTable, type Reconcile } from './Warehouse';
+
+interface Selection {
+  classes?: string[]; minPoints?: number; maxPoints?: number; registeredFrom?: string; registeredTo?: string; membersMin?: number; membersMax?: number;
+  tagsAny?: string[]; mahallas?: string[]; order?: keyof typeof ORDER_AR; limit?: number; maxQuantity?: number; include?: string[]; exclude?: string[]; manualOnly?: boolean;
+}
+
+/** كيف اختيرت عوائل الحملة، بكلام يُقرأ: للمعتمِد اليوم، ولمن يرجع إليها بعد عام. */
+function describeSelection(s: Selection, unit: string): string[] {
+  if (s.manualOnly) return [`اختيرت باليد: ${s.include?.length ?? 0} عائلة بأرقامها`];
+  const out: string[] = [];
+  if (s.classes?.length) out.push(`الفئة ${s.classes.map((c) => CLASS_AR[c as keyof typeof CLASS_AR]).join(' أو ')}`);
+  if (s.minPoints !== undefined) out.push(`${s.minPoints} نقطة فأكثر`);
+  if (s.membersMin !== undefined || s.membersMax !== undefined) out.push(`الأفراد ${s.membersMin ?? 1} إلى ${s.membersMax ?? 'ما فوق'}`);
+  if (s.registeredFrom || s.registeredTo) out.push(`سُجّلت ${s.registeredFrom ? `من ${formatDate(s.registeredFrom)} ` : ''}${s.registeredTo ? `حتى ${formatDate(s.registeredTo)}` : ''}`.trim());
+  if (s.tagsAny?.length) out.push(s.tagsAny.map((t) => TAGS[t as keyof typeof TAGS]).join(' أو '));
+  if (s.mahallas?.length) out.push(`المحلة: ${s.mahallas.join('، ')}`);
+  if (!out.length) out.push('كل من يستحق البرنامج');
+  if (s.limit || s.maxQuantity) out.push(`بسقف ${[s.limit && `${formatNumber(s.limit)} عائلة`, s.maxQuantity && `${formatNumber(s.maxQuantity)} ${unit}`].filter(Boolean).join(' و')}، ${ORDER_AR[s.order ?? 'FAMILY_NO']}`);
+  if (s.include?.length) out.push(`أُضيفت باليد: ${s.include.length}`);
+  if (s.exclude?.length) out.push(`استُثنيت باليد: ${s.exclude.length}`);
+  return out;
+}
 
 interface Detail {
   id: string; name: string; status: CampaignStatus; unit: string; program: string; startsOn: string; endsOn: string;
-  createdBy: string; decidedBy: string | null; decisionNote: string | null; fundId: string | null;
+  createdBy: string; decidedBy: string | null; decisionNote: string | null; fundId: string | null; selection: Selection;
   totals: { families: number; quantity: number; delivered: number; deliveredQuantity: number; byProxy: number };
   points: { id: string; name: string; assigned: number; quantity: number; delivered: number; deliveredQuantity: number; lastDelivery: string | null }[];
   recent: { id: string; familyId: string; familyNo: string; receiver: 'HEAD' | 'PROXY'; receiverName: string; quantity: number; deliveredAt: string; mode: 'ONLINE' | 'OFFLINE' | 'TRANSFER'; point: string; by: string; hasProof: boolean }[];
@@ -99,6 +125,8 @@ export function Campaign() {
         <Stat label="استلم بالوكالة" value={c.totals.byProxy} note="كلهم وكلاء مسجَّلون" />
       </section>
 
+      <p className="rounded-lg border border-line bg-surface px-4 py-3"><span className="text-muted">كيف اختيرت عوائلها: </span>{describeSelection(c.selection ?? {}, c.unit).join(' · ')}</p>
+
       {c.fundId && ['ACTIVE', 'CLOSED'].includes(c.status) && user && PAYOUT_READERS.includes(user.role) && <Payouts campaignId={id} active={c.status === 'ACTIVE'} />}
 
       <div className="flex flex-wrap items-start gap-5">
@@ -159,6 +187,8 @@ export function Campaign() {
           </ul>
         </Card>
       )}
+
+      <CampaignFamilies campaignId={id} campaignStatus={c.status} unit={c.unit} points={c.points} canManage={!!canManage} canExport={!!user && ['ADMIN', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'AUDITOR'].includes(user.role)} />
 
       <ReasonDialog open={dialog === 'approve'} title="تأكيد اعتماد الحملة" confirmLabel="اعتماد الحملة" required={false}
         pending={act.isPending} error={act.error?.message} onClose={() => { act.reset(); setDialog(null); }} onConfirm={(note) => act.mutate({ verb: 'approve', note })}>

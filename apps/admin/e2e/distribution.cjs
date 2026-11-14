@@ -25,15 +25,15 @@ run(async ({ step, shot, newPage }) => {
   await step('مدير التوزيع ينشئ حملة من البرنامج ويضيف نقطة ثانية', async () => {
     await login(manager, names.manager);
     await manager.getByRole('link', { name: 'حملات التوزيع' }).click();
-    await manager.getByRole('button', { name: 'حملة جديدة' }).click();
-    const dialog = manager.getByRole('dialog');
+    await manager.getByRole('link', { name: 'حملة جديدة' }).click();
+    const dialog = manager.getByRole('main');
     await dialog.getByLabel('البرنامج').selectOption({ label: 'السلة الغذائية' });
     await dialog.getByText('يستحقه الآن 4 عائلة').waitFor();
     await dialog.getByLabel('اسم الحملة').fill('سلة تشرين الثاني');
-    await dialog.getByLabel('الجولان').check();
+    await dialog.getByLabel('الجولان', { exact: true }).check();
     await dialog.getByLabel('نقطة جديدة').fill('الشهداء');
     await dialog.getByRole('button', { name: 'أضف النقطة' }).click();
-    await dialog.getByLabel('الشهداء').waitFor();
+    await dialog.getByLabel('الشهداء', { exact: true }).waitFor();
     await dialog.getByRole('button', { name: 'أنشئ المسودة' }).click();
     await manager.getByRole('heading', { name: 'سلة تشرين الثاني' }).waitFor();
     await manager.getByText('مسودة', { exact: true }).waitFor();
@@ -123,7 +123,7 @@ run(async ({ step, shot, newPage }) => {
     await manager.goto(campaignUrl);
     await manager.getByText('ما رُفض وما كُشف (2)').waitFor();
     await manager.getByText('50%').waitFor();
-    await manager.getByText('بصورة').waitFor();
+    await manager.getByText('بصورة').first().waitFor();
     await shot(manager, '20-campaign');
     await manager.getByRole('link', { name: cards[0].familyNo }).first().click();
     await manager.getByRole('heading', { name: 'ما استلمته العائلة' }).waitFor();

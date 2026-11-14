@@ -22,6 +22,14 @@ type Draft = Omit<Program, 'id' | 'eligibleFamilies' | 'eligibleQuantity'> & { i
 
 export const KINDS = { MONEY: 'مال', IN_KIND: 'عيني', PROJECT: 'مشروع', SERVICE: 'خدمة' } as const;
 const AMOUNT_TYPES = { FIXED: 'مقدار ثابت', BY_SIZE: 'بحسب عدد الأفراد', PER_MEMBER: 'لكل فرد', PER_ORPHAN: 'لكل يتيم' } as const;
+/** قوالب تُملأ بها الاستمارة ثم تُعدَّل: برامج شائعة لا تُكتب من الصفر كل مرة. */
+const TEMPLATES: { label: string; draft: Omit<Draft, 'id'> }[] = [
+  { label: 'لحوم الأضاحي', draft: { name: 'لحوم الأضاحي', kind: 'IN_KIND', unit: 'كغم', rules: {}, amount: { type: 'BY_SIZE', tiers: [{ upTo: 4, value: 2 }, { upTo: 8, value: 3 }, { upTo: null, value: 5 }] }, minGapDays: 300, active: true, itemId: null } },
+  { label: 'لحوم الصدقات', draft: { name: 'لحوم الصدقات', kind: 'IN_KIND', unit: 'كغم', rules: {}, amount: { type: 'BY_SIZE', tiers: [{ upTo: 4, value: 1 }, { upTo: 8, value: 2 }, { upTo: null, value: 3 }] }, minGapDays: 14, active: true, itemId: null } },
+  { label: 'السلة الغذائية', draft: { name: 'السلة الغذائية', kind: 'IN_KIND', unit: 'سلة', rules: {}, amount: { type: 'FIXED', value: 1 }, minGapDays: 25, active: true, itemId: null } },
+  { label: 'كسوة العيد', draft: { name: 'كسوة العيد', kind: 'IN_KIND', unit: 'قطعة', rules: {}, amount: { type: 'PER_MEMBER', value: 1 }, minGapDays: 150, active: true, itemId: null } },
+];
+
 const blank = (): Draft => ({ name: '', kind: 'IN_KIND', unit: 'سلة', rules: {}, amount: { type: 'FIXED', value: 1 }, minGapDays: 0, active: true, itemId: null });
 const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
 
@@ -168,6 +176,14 @@ export function Programs() {
       <PageHeader title="البرامج" description="كل برنامج نوع من العطاء، له شروطه ومقداره وتواتره."
         action={isAdmin && <Button onClick={() => setDraft(blank())}>برنامج جديد</Button>} />
       {programs.error && <Alert>{programs.error.message}</Alert>}
+      {isAdmin && (
+        <div role="group" aria-label="قوالب جاهزة" className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">ابدأ من قالب:</span>
+          {TEMPLATES.filter((t) => !programs.data?.some((p) => p.name === t.draft.name)).map((t) => (
+            <button key={t.label} type="button" className="min-h-10 rounded-full border border-line-strong bg-surface px-3.5 text-sm font-semibold hover:bg-ground" onClick={() => setDraft({ ...t.draft })}>{t.label}</button>
+          ))}
+        </div>
+      )}
       <div className="flex flex-wrap items-start gap-5">
         <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-3">
           {programs.isPending && <Skeleton className="h-24 w-full" />}

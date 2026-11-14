@@ -28,6 +28,8 @@ services:
       FIELD_HMAC_KEY: ${FIELD_HMAC_KEY:?}
       TOKEN_SIGNING_SEED: ${TOKEN_SIGNING_SEED:?}
       # مزوّد الرسائل. إن تُركت فارغة بقي النظام على المحاكاة: يسجّل ولا يرسل.
+      # عنوان النظام العلني. به تُبنى روابط صور الرموز المرفقة برسائل واتساب.
+      PUBLIC_BASE_URL: https://${DOMAIN:?}
       MSG_GATEWAY_URL: ${MSG_GATEWAY_URL:-}
       MSG_GATEWAY_TOKEN: ${MSG_GATEWAY_TOKEN:-}
       MSG_GATEWAY_CHANNELS: ${MSG_GATEWAY_CHANNELS:-SMS}
