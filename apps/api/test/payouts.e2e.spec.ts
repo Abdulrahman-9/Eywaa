@@ -78,9 +78,9 @@ describe('كشف الدفع بالحوالة والمحفظة', () => {
     const res = await get(`/payouts/${batchId}/file.csv`, 'accountant');
     expect(res.status).toBe(200);
     const rows = res.text.replace('﻿', '').trim().split('\r\n');
-    expect(rows[0]).toBe('الاسم,رقم العائلة,رقم المحفظة,المبلغ (دينار)');
+    expect(rows[0]).toBe('"الاسم","رقم العائلة","رقم المحفظة","المبلغ (دينار)"');
     expect(rows).toHaveLength(5);
-    expect(rows[1]).toMatch(/,"=""0770\d{7}""",100000$/);
+    expect(rows[1]).toMatch(/,"=""0770\d{7}""","100000"$/);
     const log = await sql("select count(*)::int as n from audit_log where action = 'payout.export'");
     expect(log.rows[0].n).toBe(1);
   });
@@ -161,6 +161,24 @@ describe('كشف الدفع بالحوالة والمحفظة', () => {
     expect(refused.status).toBe(409);
     expect(refused.body.message).toContain('نقد الصندوق لا يكفي');
     expect((await get(`/payouts/${b.body.id}`, 'auditor')).body.status).toBe('PENDING_APPROVAL');
+  });
+
+  it('اسم يبدأ بعلامة صيغة لا يُنفَّذ في ملف الدفع', async () => {
+    const evil = family();
+    evil.members[0].fullName = "=HYPERLINK(\"http://x\",\"اضغط\")";
+    const created = await post('/families', 'researcher', evil);
+    await post(`/families/${created.body.id}/approve`, 'supervisor');
+    const programId = (await sql("select id from programs where name = 'مساعدة نقدية'")).rows[0].id;
+    await post('/accounting/receipts', 'accountant', { fundId, amount: 500_000, party: 'متبرع', description: 'زيادة' });
+    const c = await post('/campaigns', 'manager', { name: 'حملة الصيغة', programId, startsOn: '2026-01-01', endsOn: '2099-12-31', pointIds: [pointId], fundId });
+    await post(`/campaigns/${c.body.id}/submit`, 'manager');
+    expect((await post(`/campaigns/${c.body.id}/approve`, 'manager2')).body.status).toBe('ACTIVE');
+    const cand = (await get(`/campaigns/${c.body.id}/payout-candidates`, 'accountant')).body.find((x: any) => x.headName.startsWith('='));
+    expect(cand).toBeTruthy();
+    const b = await post('/payouts', 'accountant', { campaignId: c.body.id, method: 'WALLET', provider: 'زين كاش', entitlementIds: [cand.entitlementId] });
+    const file = await get(`/payouts/${b.body.id}/file.csv`, 'accountant');
+    const row = file.text.trim().split('\r\n')[1];
+    expect(row.startsWith('"\'=HYPERLINK(')).toBe(true);
   });
 
   it('سلسلة التدقيق سليمة', async () => {

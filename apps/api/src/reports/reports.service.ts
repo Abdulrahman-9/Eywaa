@@ -6,14 +6,15 @@ const STATUS_AR: Record<string, string> = { APPROVED: 'معتمد', PENDING_APPR
 const TAG_AR: Record<string, string> = { ORPHANS: 'أيتام', WIDOW: 'أرامل', DISABLED: 'معاقون', SICK: 'مرضى', DIVORCED: 'مطلقات', NEEDY: 'متعففون', UNMARRIED: 'عوانس' };
 
 /** CSV يفتحه Excel بالعربية: علامة BOM في أوله، وكل خانة بين علامتَي تنصيص. */
+export function csvCell(v: string | number | null | undefined): string {
+  let s = v === null || v === undefined ? '' : String(v);
+  // ما يبدأ بعلامة صيغة يُسبَق بفاصلة عليا، لئلا ينفّذه برنامج الجداول صيغةً.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
 export function toCsv(header: string[], rows: (string | number | null | undefined)[][]): string {
-  const cell = (v: string | number | null | undefined) => {
-    let s = v === null || v === undefined ? '' : String(v);
-    // ما يبدأ بعلامة صيغة يُسبَق بفاصلة عليا، لئلا ينفّذه برنامج الجداول صيغةً.
-    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-    return `"${s.replace(/"/g, '""')}"`;
-  };
-  return '﻿' + [header, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+  return '\uFEFF' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
 @Injectable()

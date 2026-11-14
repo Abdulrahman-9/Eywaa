@@ -5,6 +5,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
 import { Db } from '../db/db.module';
 import { NotificationsService } from '../notifications/notifications.service';
+import { csvCell } from '../reports/reports.service';
 
 export const createPayoutSchema = z.object({
   campaignId: z.string().uuid(),
@@ -106,10 +107,13 @@ export class PayoutsService {
   async csv(id: string, actor: AuthUser) {
     const b = await this.get(id);
     await this.db.tx((c) => this.audit.append(c, { actorId: actor.id, action: 'payout.export', entity: 'payout', entityId: id, payload: { no: b.no, rows: b.lines.length } }));
-    const cell = (v: unknown) => { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    // الصفر الأول من رقم الهاتف يسقط في Excel إن قُرئ عدداً؛ فيُكتب نصاً.
-    const lines = [['الاسم', 'رقم العائلة', b.method === 'WALLET' ? 'رقم المحفظة' : 'رقم الهاتف', 'المبلغ (دينار)'], ...b.lines.map((l) => [l.recipient, l.familyNo, `="${l.account}"`, l.amount])];
-    return { name: `كشف-دفع-${b.no}`, csv: '﻿' + lines.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n' };
+    // رقم الهاتف يُكتب نصاً (="...") ليبقى صفره الأول في Excel؛ ولا يدخله إلا أرقام، فلا صيغة فيه.
+    // وبقية الخانات تمرّ بحارس الصيغ: اسم يبدأ بـ= لا يُنفَّذ.
+    const lines = [
+      ['الاسم', 'رقم العائلة', b.method === 'WALLET' ? 'رقم المحفظة' : 'رقم الهاتف', 'المبلغ (دينار)'].map(csvCell),
+      ...b.lines.map((l) => [csvCell(l.recipient), csvCell(l.familyNo), `"=""${l.account.replace(/[^\d+]/g, '')}"""`, csvCell(l.amount)]),
+    ];
+    return { name: `كشف-دفع-${b.no}`, csv: '\uFEFF' + lines.map((r) => r.join(',')).join('\r\n') + '\r\n' };
   }
 
   async approve(id: string, reference: string, actor: AuthUser) {

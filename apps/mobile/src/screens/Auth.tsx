@@ -38,9 +38,9 @@ function PinPad({ label, hint, onSubmit, busy, error }: { label: string; hint?: 
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSubmit(pin); setPin(''); }} className="flex flex-col gap-4">
       {error && <Notice>{error}</Notice>}
-      <Field label={label} hint={hint} type="password" inputMode="numeric" pattern="\d{6}" maxLength={6} value={pin} autoFocus
-        onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))} dir="ltr" className="text-center text-2xl tracking-[0.5em]" />
-      <Button type="submit" disabled={pin.length !== 6 || busy}>{busy ? 'لحظة…' : 'متابعة'}</Button>
+      <Field label={label} hint={hint} type="password" inputMode="numeric" pattern="\d{6,12}" maxLength={12} value={pin} autoFocus
+        onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 12))} dir="ltr" className="text-center text-2xl tracking-[0.4em]" />
+      <Button type="submit" disabled={pin.length < 6 || busy}>{busy ? 'لحظة…' : 'متابعة'}</Button>
     </form>
   );
 }
@@ -63,11 +63,11 @@ export function FirstRun() {
   }
   return (
     <Screen title="رمز قفل الجهاز">
-      <p>مرحباً {session.user.fullName}. ضع رمزاً من ستة أرقام يفتح التطبيق على هذا الجهاز.</p>
+      <p>مرحباً {session.user.fullName}. ضع رمزاً من ستة أرقام أو أكثر يفتح التطبيق على هذا الجهاز.</p>
       <Notice tone="warn">بيانات العوائل على الجهاز تُشفَّر بهذا الرمز. من نسيه خسر ما لم يُرفع إلى الخادم.</Notice>
       {!first
-        ? <PinPad key="a" label="الرمز" hint="ستة أرقام. لا تجعله تاريخ ميلادك ولا 123456." error={error}
-            onSubmit={(pin) => { if (/^(\d)\1{5}$|^123456$|^654321$/.test(pin)) setError('رمز سهل التخمين. اختر غيره.'); else { setError(''); setFirst(pin); } }} />
+        ? <PinPad key="a" label="الرمز" hint="من ستة أرقام إلى اثني عشر؛ والأطول أمنع. لا تجعله تاريخ ميلادك." error={error}
+            onSubmit={(pin) => { if (/^(\d)\1+$/.test(pin) || '0123456789012'.includes(pin) || '9876543210987'.includes(pin)) setError('رمز سهل التخمين. اختر غيره.'); else { setError(''); setFirst(pin); } }} />
         : <PinPad key="b" label="أعد الرمز للتأكيد" busy={busy} error={error}
             onSubmit={async (pin) => {
               if (pin !== first) { setError('الرمزان مختلفان. أعد من البداية.'); setFirst(''); return; }
