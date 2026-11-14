@@ -98,7 +98,9 @@ describe('المتعهدون', () => {
   it('مزامنة المتعهد من هاتفه المنقطع: من نقطته فقط', async () => {
     const m = (await get(`/campaigns/${campaignId}/manifest?pointId=${agentPoint}`, 'agent')).body;
     const pending = m.entries.filter((e: any) => e.status === 'PENDING');
-    const items = pending.map((e: any) => ({ entitlementId: e.id, deliveredAt: new Date().toISOString(), clientOpId: randomUUID(), receiver: 'HEAD', receiverName: e.headName }));
+    const cards = (await get(`/campaigns/${campaignId}/tokens`, 'manager')).body as any[];
+    const items = pending.map((e: any) => ({ entitlementId: e.id, deliveredAt: new Date().toISOString(), clientOpId: randomUUID(), receiver: 'HEAD', receiverName: e.headName,
+      proof: { token: cards.find((t) => t.entitlementId === e.id).token } }));
     expect((await post('/deliveries/sync', 'agent', { pointId: agent2Point, deviceId: 'phone', items })).status).toBe(403);
     const ok = await post('/deliveries/sync', 'agent', { pointId: agentPoint, deviceId: 'phone', items });
     expect(ok.body.applied).toBe(pending.length);

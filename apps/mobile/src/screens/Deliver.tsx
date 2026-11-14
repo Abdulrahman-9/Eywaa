@@ -70,9 +70,11 @@ export function Deliver({ onBack }: { onBack: () => void }) {
     setStep({ at: 'receiver', subject, opId, busy: true });
     const base = { clientOpId: opId, entitlementId: subject.entitlementId, familyNo: subject.familyNo, headName: subject.headName, quantity: subject.quantity, unit: station.unit,
       deliveredAt: new Date().toISOString(), receiver: receiver.kind, receiverName: receiver.name, photo: 'NONE' as const };
+    // ما حضرت به العائلة يُحفظ مع التسليم المنقطع: به يثبت للخادم عند المزامنة أن رمزها حضر.
+    const proof = 'token' in subject.locate ? { token: subject.locate.token } : { code: subject.locate.code };
     const finish = (offline: boolean) => setStep({ at: 'done', opId, name: receiver.name, familyNo: subject.familyNo, quantity: subject.quantity, offline, photo: false });
     if (subject.via === 'OFFLINE') {
-      await app.recordDelivery({ ...base, mode: 'OFFLINE', sync: 'PENDING' });
+      await app.recordDelivery({ ...base, mode: 'OFFLINE', sync: 'PENDING', proof });
       return finish(true);
     }
     try {
@@ -90,7 +92,7 @@ export function Deliver({ onBack }: { onBack: () => void }) {
       // بالمعرّف نفسه، فإن كان الخادم قد قبلها عدّتها المزامنة واحدة. وإلا فلا يُسلَّم حتى يُعاد الطلب.
       const mine = manifest.entries.some((e) => e.id === subject.entitlementId && e.status === 'PENDING') && !localIds().has(subject.entitlementId);
       if (mine) {
-        await app.recordDelivery({ ...base, mode: 'OFFLINE', sync: 'PENDING' });
+        await app.recordDelivery({ ...base, mode: 'OFFLINE', sync: 'PENDING', proof });
         return finish(true);
       }
       setStep({ at: 'receiver', subject, opId, retry: receiver, error: 'انقطع الاتصال قبل تأكيد الخادم، وهذه العائلة ليست من حصة جهازك. لا تسلّم حتى ينجح الطلب.' });

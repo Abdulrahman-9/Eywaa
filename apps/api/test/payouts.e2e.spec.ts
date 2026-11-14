@@ -94,9 +94,14 @@ describe('كشف الدفع بالحوالة والمحفظة', () => {
   it('من استلم نقداً من جهاز منقطع قبل الاعتماد لا يُدفع له ثانية', async () => {
     const line = (await get(`/payouts/${batchId}`, 'accountant')).body.lines[3];
     const synced = await post('/deliveries/sync', 'distributor', { pointId, deviceId: 'phone-1', items: [
-      { entitlementId: line.entitlementId, deliveredAt: new Date().toISOString(), clientOpId: randomUUID(), receiver: 'HEAD', receiverName: line.recipient },
+      { entitlementId: line.entitlementId, deliveredAt: new Date().toISOString(), clientOpId: randomUUID(), receiver: 'HEAD', receiverName: line.recipient,
+        proof: { token: toks.find((t) => t.entitlementId === line.entitlementId).token } },
     ] });
     expect(synced.body.applied).toBe(1);
+    // والحملة لا تُقفل وكشف دفعها معلّق: لو أُقفلت لبقي ما نُفّذ عند المزوّد بلا قيد.
+    const close = await post(`/campaigns/${campaignId}/close`, 'manager');
+    expect(close.status).toBe(409);
+    expect(close.body.message).toContain('كشف دفع');
   });
 
   it('الاعتماد بمرجعه يعدّ الباقين مستلِمين، ويقيّد المبلغ على الصندوق قيداً واحداً، ويُبلغ كل عائلة', async () => {

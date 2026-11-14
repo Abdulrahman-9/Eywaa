@@ -8,8 +8,14 @@ export interface Station { campaignId: string; campaignName: string; unit: strin
 export interface Delivery {
   clientOpId: string; entitlementId: string; familyNo: string; headName: string; quantity: number; unit: string;
   deliveredAt: string; receiver: 'HEAD' | 'PROXY'; receiverName: string; mode: 'ONLINE' | 'OFFLINE';
-  /** PENDING: لم يبلغ الخادم بعد. CONFLICT: الخادم وجده مسلَّماً قبلنا، ورُفع بلاغ. */
-  sync: 'PENDING' | 'SYNCED' | 'CONFLICT' | 'UNKNOWN';
+  /** PENDING: لم يبلغ الخادم بعد. CONFLICT: الخادم وجده مسلَّماً قبلنا، ورُفع بلاغ. REJECTED: لم يقبله الخادم (وسببه في error)، ورُفع بلاغ. */
+  sync: 'PENDING' | 'SYNCED' | 'CONFLICT' | 'UNKNOWN' | 'REJECTED';
+  /**
+   * ما حضرت به العائلة حين سُلِّمت والجهاز منقطع: الرمز المصوَّر أو الرمز الرقمي.
+   * يُرفع مع التسليم ليتحقق منه الخادم (لا يصدّق الخادم جهازاً بلا برهان)، ثم يُمحى من الجهاز.
+   */
+  proof?: { token: string } | { code: string };
+  error?: string;
   photo: 'NONE' | 'PENDING' | 'SENT';
   conflict?: { first?: { at?: string; point?: string; receiverName?: string } };
 }
@@ -237,18 +243,26 @@ export const app = {
       for (;;) {
         const batch = state.deliveries.filter((d) => d.sync === 'PENDING').slice(0, 200);
         if (!batch.length || !state.station) break;
-        const res = await api<{ results: { clientOpId: string; result: 'APPLIED' | 'ALREADY_SYNCED' | 'CONFLICT' | 'UNKNOWN'; details?: Delivery['conflict'] }[] }>('/deliveries/sync', {
+        const res = await api<{ results: { clientOpId: string; result: 'APPLIED' | 'ALREADY_SYNCED' | 'CONFLICT' | 'UNKNOWN' | 'REJECTED' | 'FAILED'; message?: string; details?: Delivery['conflict'] }[] }>('/deliveries/sync', {
           token, timeoutMs: 30_000,
-          body: { pointId: state.station.pointId, deviceId: state.meta!.deviceId, items: batch.map((d) => ({ entitlementId: d.entitlementId, deliveredAt: d.deliveredAt, clientOpId: d.clientOpId, receiver: d.receiver, receiverName: d.receiverName })) },
+          body: { pointId: state.station.pointId, deviceId: state.meta!.deviceId, items: batch.map((d) => ({ entitlementId: d.entitlementId, deliveredAt: d.deliveredAt, clientOpId: d.clientOpId, receiver: d.receiver, receiverName: d.receiverName, proof: d.proof })) },
         });
         const by = new Map(res.results.map((r) => [r.clientOpId, r]));
         await save({
           deliveries: state.deliveries.map((d) => {
             const r = by.get(d.clientOpId);
-            if (!r) return d;
-            return r.result === 'CONFLICT' ? { ...d, sync: 'CONFLICT' as const, conflict: r.details } : r.result === 'UNKNOWN' ? { ...d, sync: 'UNKNOWN' as const } : { ...d, sync: 'SYNCED' as const };
+            // FAILED: تعذّر مؤقت في الخادم، فيبقى البند ينتظر ويُعاد في المزامنة التالية.
+            if (!r || r.result === 'FAILED') return d;
+            // البرهان أدّى ما عليه: لا يبقى رمز العائلة على الجهاز بعد أن حكم فيه الخادم.
+            const { proof: _proof, ...rest } = d;
+            return r.result === 'CONFLICT' ? { ...rest, sync: 'CONFLICT' as const, conflict: r.details }
+              : r.result === 'UNKNOWN' ? { ...rest, sync: 'UNKNOWN' as const }
+              : r.result === 'REJECTED' ? { ...rest, sync: 'REJECTED' as const, error: r.message ?? 'لم يقبله الخادم' }
+              : { ...rest, sync: 'SYNCED' as const };
           }),
         });
+        // إن لم يتقدّم شيء من هذه الدفعة (تعذّر مؤقت في الخادم) فلا تُعاد في الحال: تنتظر المزامنة التالية.
+        if (!batch.some((d) => { const r = by.get(d.clientOpId); return r && r.result !== 'FAILED'; })) break;
       }
       for (const d of state.deliveries.filter((x) => x.photo === 'PENDING' && (x.sync === 'SYNCED' || x.sync === 'CONFLICT'))) {
         const bytes = await vault.getBytes(`photo:${d.clientOpId}`);

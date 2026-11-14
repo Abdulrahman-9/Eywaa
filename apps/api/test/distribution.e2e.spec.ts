@@ -256,7 +256,7 @@ describe('التسليم دون اتصال', () => {
           const res = checkOffline(t.token, m, stores[d], now);
           if (res.ok) {
             accepted++;
-            stores[d].push({ entitlementId: res.entry.id, deliveredAt: new Date().toISOString(), receiver: 'HEAD', receiverName: res.entry.receivers[0].name, clientOpId: randomUUID() });
+            stores[d].push({ entitlementId: res.entry.id, deliveredAt: new Date().toISOString(), receiver: 'HEAD', receiverName: res.entry.receivers[0].name, clientOpId: randomUUID(), proof: { token: t.token } });
           }
         });
       }
@@ -279,16 +279,17 @@ describe('التسليم دون اتصال', () => {
   it('الرمز الرقمي يُتحقَّق منه والجهاز منقطع: يقبله جهازه وحده، والخاطئ ورقم غير البيان بجواب واحد', () => {
     const t = camp.toks[0];
     const d = manifests.findIndex((m) => m.entries.some((e) => e.id === t.entitlementId));
-    expect(manifests[d].entries.every((e) => typeof e.codeCheck === 'string' && e.codeCheck.length > 10)).toBe(true);
+    // البرهان في البيان ستة عشر بتاً فقط: لا يُستخرج منه الرمز ولو جُرّبت الأرقام كلها، وبصمة الرمز الكاملة لا تغادر الخادم.
+    expect(manifests[d].entries.every((e) => typeof e.codeCheck === 'string' && /^[0-9a-f]{4}$/.test(e.codeCheck) && !('codeHash' in e))).toBe(true);
     // في المخزن المحلي تسليمه السابق بالرمز المصوَّر، فيُرفض مكرَّراً.
     expect(checkOfflineCode(t.familyNo, t.code, manifests[d], stores[d], now)).toEqual({ ok: false, reason: 'ALREADY_DELIVERED' });
     const fresh = checkOfflineCode(t.familyNo, t.code, manifests[d], [], now);
     expect(fresh.ok && fresh.entry.id).toBe(t.entitlementId);
     const wrong = String((Number(t.code) + 1) % 100000000).padStart(8, '0');
-    expect(checkOfflineCode(t.familyNo, wrong, manifests[d], [], now)).toEqual({ ok: false, reason: 'BAD_SIGNATURE' });
-    expect(checkOfflineCode('0000000', t.code, manifests[d], [], now)).toEqual({ ok: false, reason: 'BAD_SIGNATURE' });
+    expect(checkOfflineCode(t.familyNo, wrong, manifests[d], [], now)).toEqual({ ok: false, reason: 'BAD_CODE' });
+    expect(checkOfflineCode('0000000', t.code, manifests[d], [], now)).toEqual({ ok: false, reason: 'BAD_CODE' });
     const other = manifests[(d + 1) % 4];
-    expect(checkOfflineCode(t.familyNo, t.code, other, [], now)).toEqual({ ok: false, reason: 'BAD_SIGNATURE' });
+    expect(checkOfflineCode(t.familyNo, t.code, other, [], now)).toEqual({ ok: false, reason: 'BAD_CODE' });
     expect(checkOfflineCode(t.familyNo, t.code, manifests[d], [], manifests[d].endsAt + 1)).toEqual({ ok: false, reason: 'EXPIRED' });
   });
 
@@ -322,6 +323,53 @@ describe('التسليم دون اتصال', () => {
     // التسليم الأول باقٍ كما هو.
     const row = await sql('select mode, device_id from entitlements where id = $1', [victim.entitlementId]);
     expect(row.rows[0]).toMatchObject({ mode: 'ONLINE', device_id: 'dev-distributor2' });
+  });
+
+  it('ما ادّعاه الجهاز بلا برهان من رمز العائلة لا يُسجَّل، ويُرفع بلاغاً باسم صاحبه', async () => {
+    const d = 2;
+    const sync = (items: any[]) => post('/deliveries/sync', 'distributor', { pointId: manifests[d].pointId, deviceId: 'offline-2', items });
+    const bare = stores[d].map(({ proof, ...rest }) => ({ ...rest, clientOpId: randomUUID() }));
+    const none = await sync(bare);
+    expect(none.body).toMatchObject({ applied: 0, rejected: bare.length });
+    expect(none.body.results.every((r: any) => r.result === 'REJECTED' && r.reason === 'NO_PROOF')).toBe(true);
+    // رمز عائلة أخرى لا ينفع، ولا رمز رقمي خاطئ.
+    const other = camp.toks.find((t) => t.entitlementId !== bare[0].entitlementId);
+    const forged = await sync([{ ...bare[0], clientOpId: randomUUID(), proof: { token: other.token } }, { ...bare[0], clientOpId: randomUUID(), proof: { code: '00000000' } }]);
+    expect(forged.body.results.map((r: any) => r.reason)).toEqual(['NO_PROOF', 'NO_PROOF']);
+    const still = await sql('select status from entitlements where id = any($1)', [bare.map((b) => b.entitlementId)]);
+    expect(still.rows.every((r) => r.status === 'PENDING')).toBe(true);
+    const inc = await sql("select details from delivery_incidents where kind = 'UNPROVEN_OFFLINE' and device_id = 'offline-2'");
+    expect(inc.rows.map((r) => r.details.proof).sort()).toEqual([...bare.map(() => 'NONE'), 'BAD_CODE', 'BAD_TOKEN'].sort());
+    const alert = (await get(`/campaigns/${camp.id}/alerts`, 'manager')).body.find((a: any) => a.kind === 'UNPROVEN_OFFLINE');
+    expect(alert).toMatchObject({ severity: 'HIGH', who: 'distributor' });
+    // وبالرمز الرقمي الصحيح، أو بالرمز المصوَّر، يُسجَّل.
+    const first = camp.toks.find((t) => t.entitlementId === stores[d][0].entitlementId);
+    const ok = await sync([{ ...stores[d][0], proof: { code: first.code } }, ...stores[d].slice(1)]);
+    expect(ok.body).toMatchObject({ applied: stores[d].length, rejected: 0 });
+  });
+
+  it('ساعة جهاز مختلّة، واستحقاق أُلغي، وحملة أُقفلت قبل المزامنة: لكلٍّ حكمه وبلاغه', async () => {
+    const d = 3;
+    const sync = (items: any[]) => post('/deliveries/sync', 'distributor', { pointId: manifests[d].pointId, deviceId: 'offline-3', items });
+    const [a, b] = stores[d];
+    // ساعة الجهاز عند 1970: يُسجَّل بوقت وصوله ويُرفع بلاغ، فلا يُحتال بها على فاصل البرنامج ولا على إنذارات الليل.
+    const old = await sync([{ ...a, deliveredAt: '1970-01-01T00:00:00.000Z' }]);
+    expect(old.body.applied).toBe(1);
+    const rec = (await sql('select delivered_at from entitlements where id = $1', [a.entitlementId])).rows[0];
+    expect(Date.now() - new Date(rec.delivered_at).getTime()).toBeLessThan(60_000);
+    expect((await sql("select count(*)::int as n from delivery_incidents where kind = 'BAD_CLOCK' and entitlement_id = $1", [a.entitlementId])).rows[0].n).toBe(1);
+    // استحقاق أُلغي والجهاز منقطع لا يدري: لا يُسجَّل، ويُرفع بلاغ.
+    await sql("update entitlements set status = 'CANCELLED' where id = $1", [b.entitlementId]);
+    const gone = await sync([b]);
+    expect(gone.body.results[0]).toMatchObject({ result: 'REJECTED', reason: 'CANCELLED' });
+    expect((await sql('select status from entitlements where id = $1', [b.entitlementId])).rows[0].status).toBe('CANCELLED');
+    // والحملة أُقفلت قبل أن يزامن: يُحال إلى مدير التوزيع.
+    expect((await post(`/campaigns/${camp.id}/close`, 'manager')).status).toBe(200);
+    const late = await sync([{ ...b, clientOpId: randomUUID() }]);
+    expect(late.body.results[0]).toMatchObject({ result: 'REJECTED', reason: 'CAMPAIGN_CLOSED' });
+    // بند مجهول وبند فاسد لا يوقفان ما معهما.
+    const mixed = await sync([{ ...b, clientOpId: randomUUID(), entitlementId: randomUUID() }, { ...a }]);
+    expect(mixed.body.results.map((r: any) => r.result)).toEqual(['UNKNOWN', 'ALREADY_SYNCED']);
   });
 
   it('سلسلة التدقيق سليمة، ولكل تسليم سطر', async () => {
@@ -439,5 +487,67 @@ describe('المتابعة اليومية وإنذارات الاحتيال', ()
     const row = open.find((c: any) => c.campaignId === camp.id);
     expect(row.alerts).toBeGreaterThanOrEqual(3);
     expect(row).toHaveProperty('high');
+  });
+});
+
+describe('ما أضافته المراجعة إلى التوزيع', () => {
+  let campId: string, toks: any[];
+
+  it('من عدّل مسودة غيره أو أرسلها لا يعتمدها', async () => {
+    await sql("update entitlements set status = 'CANCELLED', delivered_at = null, delivered_by = null, receiver = null where status in ('DELIVERED', 'PENDING')");
+    const body = { name: 'حملة الاعتماد المزدوج', programId, startsOn: '2026-01-01', endsOn: '2099-12-31', pointIds: [p1] };
+    const c = await post('/campaigns', 'manager', body);
+    expect(c.status).toBe(201);
+    campId = c.body.id;
+    // مدير ثانٍ يعدّل المسودة ثم يرسلها: صار من أصحابها، فلا يعتمد عمل يده.
+    expect((await api().put(`/api/campaigns/${campId}`).set(as('manager2')).send({ ...body, name: 'حملة عدّلها غير منشئها' })).status).toBe(200);
+    expect((await post(`/campaigns/${campId}/submit`, 'manager2')).status).toBe(200);
+    expect((await post(`/campaigns/${campId}/approve`, 'manager2')).status).toBe(403);
+    expect((await post(`/campaigns/${campId}/approve`, 'manager')).status).toBe(403);
+    expect((await post(`/campaigns/${campId}/approve`, 'admin')).status).toBe(200);
+    toks = (await get(`/campaigns/${campId}/tokens`, 'manager')).body;
+  });
+
+  it('عائلة لا تدخل حملتين قائمتين للبرنامج نفسه ولو أُنشئتا في اللحظة نفسها', async () => {
+    await approvedFamily();
+    const body = (name: string) => ({ name, programId, startsOn: '2026-01-01', endsOn: '2099-12-31', pointIds: [p2] });
+    const both = await Promise.all([post('/campaigns', 'manager', body('متسابقة أولى')), post('/campaigns', 'manager2', body('متسابقة ثانية'))]);
+    const made = both.filter((r) => r.status === 201);
+    expect(made.length).toBeGreaterThanOrEqual(1);
+    const twice = await sql(
+      `select count(*)::int as n from (select e.family_id from entitlements e join campaigns c on c.id = e.campaign_id
+         where c.program_id = $1 and e.status = 'PENDING' and c.status in ('DRAFT', 'PENDING_APPROVAL', 'ACTIVE') group by e.family_id having count(*) > 1) x`, [programId]);
+    expect(twice.rows[0].n).toBe(0);
+    for (const r of made) await post(`/campaigns/${r.body.id}/cancel`, 'manager', { note: 'تجربة السباق' });
+  });
+
+  it('الرمز الرقمي لا يُخمَّن بلا حدّ: خمس محاولات خاطئة على رقم العائلة، ثم لا يبقى إلا الرمز المصوَّر', async () => {
+    const t = toks[0];
+    const guess = (code: string, user = 'distributor') => post('/deliveries/check', user, { pointId: p1, deviceId: 'd1', locate: { campaignId: campId, familyNo: t.familyNo, code } });
+    for (let i = 0; i < 5; i++) expect((await guess(String(20000000 + i))).body.code).toBe('BAD_CODE');
+    const locked = await guess(t.code);
+    expect([locked.status, locked.body.code]).toEqual([429, 'CODE_LOCKED']);
+    // الحدّ على رقم العائلة: لا يتجاوزه تبديل الموظف.
+    expect((await guess(t.code, 'distributor2')).status).toBe(429);
+    expect((await post('/deliveries/check', 'distributor', { pointId: p1, deviceId: 'd1', locate: { token: t.token } })).status).toBeLessThan(300);
+  });
+
+  it('نقطة مختلَقة تُرفض بخطأ إدخال لا بخطأ خادم، والطلب المكرَّر بمعرّفه لا يُعدّ عرضاً ثانياً للرمز', async () => {
+    const t = toks[1];
+    const ghost = await post('/deliveries/check', 'distributor', { pointId: randomUUID(), deviceId: 'd1', locate: { token: t.token } });
+    expect(ghost.status).toBe(400);
+    const op = randomUUID();
+    const pair = await Promise.all([redeem(t.token, p1, 'distributor', { kind: 'HEAD' }, op), redeem(t.token, p1, 'distributor', { kind: 'HEAD' }, op)]);
+    expect(pair.map((r) => r.status < 300)).toEqual([true, true]);
+    expect(pair[0].body.entitlementId).toBe(pair[1].body.entitlementId);
+    expect((await sql("select count(*)::int as n from delivery_incidents where kind = 'ALREADY_DELIVERED' and entitlement_id = $1", [t.entitlementId])).rows[0].n).toBe(0);
+  });
+
+  it('صورة الإثبات يرفعها من سلّم أو مدير، لا موظف آخر', async () => {
+    const t = toks[1];
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('JFIF-proof-0123456789')]);
+    const upload = (user: string) => api().post(`/api/deliveries/${t.entitlementId}/proof`).set(as(user)).attach('file', jpeg, 'proof.jpg');
+    expect((await upload('distributor2')).status).toBe(403);
+    expect((await upload('distributor')).status).toBeLessThan(300);
   });
 });

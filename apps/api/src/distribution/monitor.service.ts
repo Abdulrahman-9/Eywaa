@@ -89,16 +89,36 @@ export class MonitorService {
         detail: `رمز العائلة ${r.family_no} عُرض في: ${r.points.join('، ')}.` });
     }
 
+    // العدّ على الموظف لا على معرّف الجهاز: المعرّف يرسله الجهاز نفسه، فمن غيّره قسّم محاولاته فلم يبلغ الحدّ.
     const burst = await this.db.query(
-      `select device_id, max(n)::int as n, max(at) as at, string_agg(distinct username, '، ') as who from (
+      `select max(n)::int as n, max(at) as at, username as who, string_agg(distinct device_id, '، ') as devices from (
          select i.device_id, i.at, u.username,
-                count(*) over (partition by i.device_id order by i.at range between make_interval(mins => $3) preceding and current row) as n
+                count(*) over (partition by i.reported_by order by i.at range between make_interval(mins => $3) preceding and current row) as n
          from delivery_incidents i join users u on u.id = i.reported_by
-         where i.campaign_id = $1 and i.kind in ('BAD_SIGNATURE', 'BAD_CODE') and i.device_id is not null
-       ) w group by device_id having max(n) >= $2`, [campaignId, L.badBurst, L.badBurstMinutes]);
+         where i.campaign_id = $1 and i.kind in ('BAD_SIGNATURE', 'BAD_CODE')
+       ) w group by username having max(n) >= $2`, [campaignId, L.badBurst, L.badBurstMinutes]);
     for (const r of burst.rows) {
-      out.push({ kind: 'BAD_BURST', severity: 'HIGH', title: `${r.n} رموز خاطئة في ${L.badBurstMinutes} دقائق من جهاز واحد`, at: iso(r.at), who: r.who,
-        detail: `الجهاز ${r.device_id} (${r.who}) أدخل ${r.n} رموزاً خاطئة أو مزوَّرة متتابعة. تخمين للرموز، أو رموز مزوَّرة تُجرَّب.` });
+      out.push({ kind: 'BAD_BURST', severity: 'HIGH', title: `${r.n} رموز خاطئة في ${L.badBurstMinutes} دقائق من موظف واحد`, at: iso(r.at), who: r.who,
+        detail: `${r.who} أدخل ${r.n} رموزاً خاطئة أو مزوَّرة متتابعة${r.devices ? ` (الجهاز ${r.devices})` : ''}. تخمين للرموز، أو رموز مزوَّرة تُجرَّب.` });
+    }
+
+    // ما ادّعاه جهاز منقطع ولم يقبله الخادم: تسليم بلا برهان من رمز العائلة، أو لاستحقاق أُلغي، أو لحملة أُقفلت.
+    const refused = await this.db.query(
+      `select i.kind, i.at, i.details, u.username, f.family_no from delivery_incidents i join users u on u.id = i.reported_by
+         left join entitlements e on e.id = i.entitlement_id left join families f on f.id = e.family_id
+       where i.campaign_id = $1 and (i.kind = 'UNPROVEN_OFFLINE' or i.kind = 'BAD_CLOCK' or (i.details->>'offline' = 'true' and i.details->>'applied' = 'false'))
+       order by i.at desc limit 200`, [campaignId]);
+    for (const r of refused.rows) {
+      const unproven = r.kind === 'UNPROVEN_OFFLINE', clock = r.kind === 'BAD_CLOCK';
+      out.push({
+        kind: unproven ? 'UNPROVEN_OFFLINE' : clock ? 'BAD_CLOCK' : 'OFFLINE_REFUSED', severity: clock ? 'MEDIUM' : 'HIGH', at: iso(r.at), familyNo: r.family_no, who: r.username,
+        title: unproven ? 'تسليم دون اتصال بلا برهان' : clock ? 'ساعة جهاز خارج مدة الحملة' : 'تسليم دون اتصال لم يُسجَّل',
+        detail: unproven
+          ? `${r.username} رفع تسليماً دون اتصال للعائلة ${r.family_no ?? '—'} وليس معه رمزها (${r.details?.proof === 'NONE' ? 'بلا برهان' : 'برهان لا يطابق'}). لم يُسجَّل، والاستحقاق باقٍ لأهله. اسأله عنه.`
+          : clock
+            ? `${r.username} سجّل تسليماً للعائلة ${r.family_no ?? '—'} بوقت خارج مدة الحملة. سُجّل بوقت وصوله. افحص ساعة الجهاز.`
+            : `${r.username} رفع تسليماً دون اتصال للعائلة ${r.family_no ?? '—'} ولم يُسجَّل (${r.kind === 'CANCELLED' ? 'الاستحقاق ملغى' : r.kind === 'WRONG_POINT_OFFLINE' ? 'ليست من حصته' : r.kind === 'EXPIRED' ? 'بعد انتهاء المدة' : 'الحملة ليست جارية'}). إن كان سلّم فعلاً ففي عهدته فرق يُسوّى.`,
+      });
     }
 
     const staff = await this.db.query(

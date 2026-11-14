@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, GoneException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, GoneException, HttpException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomInt, timingSafeEqual } from 'crypto';
 import * as QRCode from 'qrcode';
 import { PoolClient } from 'pg';
@@ -88,18 +88,22 @@ export const redeemSchema = z.object({
   ...station, locate: locator, clientOpId: z.string().uuid(),
   receiver: z.union([z.object({ kind: z.literal('HEAD') }), z.object({ kind: z.literal('PROXY'), proxyId: z.string().uuid() })]),
 });
+/** برهان أن رمز العائلة حضر عند التسليم: الرمز المصوَّر كما قُرئ، أو الرمز الرقمي كما أُدخل. */
+const proofSchema = z.union([z.object({ token: z.string().min(10).max(1000) }), z.object({ code: z.string().min(4).max(20) })]);
 export const syncSchema = z.object({
   ...station,
   items: z.array(z.object({
     entitlementId: z.string().uuid(), deliveredAt: z.string().datetime(), clientOpId: z.string().uuid(),
     receiver: z.enum(['HEAD', 'PROXY']), receiverName: z.string().trim().min(1).max(200),
+    // اختياري في الصيغة ليُجاب عن البند الخالي منه وحده بالرفض، لا ليُردّ الطلب كله.
+    proof: proofSchema.optional(),
   })).max(2000),
 });
 export type CheckInput = z.infer<typeof checkSchema>;
 export type RedeemInput = z.infer<typeof redeemSchema>;
 export type SyncInput = z.infer<typeof syncSchema>;
 
-type IncidentKind = 'ALREADY_DELIVERED' | 'BAD_SIGNATURE' | 'EXPIRED' | 'NOT_ACTIVE' | 'CANCELLED' | 'WRONG_POINT_OFFLINE' | 'DOUBLE_DELIVERY' | 'BAD_CODE';
+type IncidentKind = 'ALREADY_DELIVERED' | 'BAD_SIGNATURE' | 'EXPIRED' | 'NOT_ACTIVE' | 'CANCELLED' | 'WRONG_POINT_OFFLINE' | 'DOUBLE_DELIVERY' | 'BAD_CODE' | 'UNPROVEN_OFFLINE' | 'BAD_CLOCK';
 const MESSAGES: Record<IncidentKind, string> = {
   ALREADY_DELIVERED: 'لا تسلّم: هذا الرمز استُعمل من قبل',
   BAD_SIGNATURE: 'لا تسلّم: رمز غير صحيح أو مزوَّر',
@@ -109,10 +113,25 @@ const MESSAGES: Record<IncidentKind, string> = {
   CANCELLED: 'لا تسلّم: أُلغي هذا الاستحقاق',
   WRONG_POINT_OFFLINE: 'سُلِّم دون اتصال في غير نقطته',
   DOUBLE_DELIVERY: 'سُلِّم مرتين',
+  UNPROVEN_OFFLINE: 'لم يُسجَّل: تسليم دون اتصال بلا برهان من رمز العائلة',
+  BAD_CLOCK: 'وقت التسليم في الجهاز خارج مدة الحملة',
 };
+
+/** للموظف الواحد عشر محاولات خاطئة للرمز الرقمي في عشر دقائق، ولرقم العائلة الواحد خمس في الساعة. */
+const CODE_TRIES_PER_STAFF = 10;
+const CODE_TRIES_PER_FAMILY = 5;
+/** ما يُحتمل من فرق بين ساعة الجهاز وساعة الخادم. */
+const CLOCK_SLACK_MS = 10 * 60_000;
+/** اسم المستلم كما يدخل السجل ورسالة التأكيد: حروف ومسافات، لا روابط ولا أرقام. */
+const cleanName = (v: string) => v.replace(/[^\p{L}\p{M} .'-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'غير مسمّى';
+
+type Querier = { query: (t: string, p?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
+type SyncItem = SyncInput['items'][number];
+type SyncResult = { result: 'APPLIED' | 'ALREADY_SYNCED' | 'CONFLICT' | 'UNKNOWN' | 'REJECTED' | 'FAILED'; reason?: string; message?: string; details?: unknown };
 
 const ENT_SQL = `
   select e.*, c.name as campaign_name, c.status as campaign_status, c.starts_on, c.ends_on, c.unit, c.program_id,
+         c.decided_at as campaign_decided_at, c.created_at as campaign_created_at,
          f.family_no, h.full_name as head_name, ap.name as assigned_point_name, dp.name as delivered_point_name
   from entitlements e join campaigns c on c.id = e.campaign_id join families f on f.id = e.family_id
     left join persons h on h.family_id = f.id and h.relation = 'HEAD'
@@ -143,6 +162,7 @@ class Refusal extends Error {
 
 @Injectable()
 export class DistributionService {
+  private readonly logger = new Logger(DistributionService.name);
   private readonly signer: TokenSigner;
 
   constructor(
@@ -203,10 +223,11 @@ export class DistributionService {
    * المتعهد لا يعمل إلا من نقطته، ولا يسلّم إلا من حصته.
    * الموظف في نقطة ثابتة يسلّم لأي عائلة في الحملة والجهاز متصل؛ والمتعهد لا: عهدته محدودة ومحسوبة عليه.
    */
-  private async agentGuard(actor: AuthUser, pointId: string, entitlementPoint?: string, campaignId?: string) {
+  private async agentGuard(actor: AuthUser, pointId: string, entitlementPoint?: string, campaignId?: string, q: Querier = this.db) {
     if (actor.role !== 'DISTRIBUTION_AGENT') return;
     // نقطته هو، أو نقطة ثابتة جُعل مسؤولها في حملة جارية.
-    const mine = (await this.db.query(
+    // داخل معاملة يُسأل باتصالها نفسه: لو طلب كل تسليم اتصالاً ثانياً من الحوض لعلق الخادم يوم يمتلئ.
+    const mine = (await q.query(
       `select 1 from distribution_points p where p.id = $1 and (p.agent_id = $2 or exists (
          select 1 from campaign_point_agents a where a.point_id = p.id and a.agent_id = $2 and ($3::uuid is null or a.campaign_id = $3)))`, [pointId, actor.id, campaignId ?? null])).rowCount;
     if (!mine) throw new ForbiddenException('هذه ليست نقطتك');
@@ -318,11 +339,13 @@ export class DistributionService {
   async create(input: CampaignInput, actor: AuthUser) {
     const { program, selection, picked, list } = await this.resolve(input);
     const id = await this.db.tx(async (c) => {
+      await this.programLock(c, program.id);
       const { rows } = await c.query(
         'insert into campaigns (name, program_id, unit, starts_on, ends_on, created_by, fund_id, selection) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id',
         [input.name, program.id, program.unit, input.startsOn, input.endsOn, actor.id, input.fundId ?? null, JSON.stringify(selection)],
       );
       await this.fill(c, rows[0].id, list, input.pointIds);
+      await this.guardOverlap(c, rows[0].id, program.id);
       await this.audit.append(c, {
         actorId: actor.id, action: 'campaign.create', entity: 'campaign', entityId: rows[0].id,
         payload: { name: input.name, program: program.name, families: list.length, quantity: list.reduce((s, e) => s + e.quantity, 0), funnel: picked.funnel, selection },
@@ -330,6 +353,21 @@ export class DistributionService {
       return rows[0].id as string;
     });
     return this.detail(id);
+  }
+
+  /** الحملات على البرنامج الواحد تُنشأ وتُعدَّل واحدة بعد واحدة، فلا تسبق إحداهما الأخرى إلى العائلة نفسها. */
+  private async programLock(c: PoolClient, programId: string) {
+    await c.query("select pg_advisory_xact_lock(hashtext('campaign-program:' || $1))", [programId]);
+  }
+
+  /** بعد ملء الحملة: لا عائلة فيها لها استحقاق قائم في حملة أخرى للبرنامج نفسه. الفحص قبل المعاملة لا يكفي إن تسابق منشئان. */
+  private async guardOverlap(c: PoolClient, campaignId: string, programId: string) {
+    const { rows } = await c.query(
+      `select count(*)::int as n from entitlements e where e.campaign_id = $1 and exists (
+         select 1 from entitlements o join campaigns oc on oc.id = o.campaign_id
+         where o.family_id = e.family_id and o.campaign_id <> $1 and oc.program_id = $2 and o.status = 'PENDING' and oc.status in ('DRAFT', 'PENDING_APPROVAL', 'ACTIVE'))`,
+      [campaignId, programId]);
+    if (rows[0].n) throw new ConflictException(`${rows[0].n} عائلة دخلت حملة أخرى للبرنامج نفسه قبل لحظة. أعد المعاينة ثم احفظ.`);
   }
 
   /**
@@ -345,9 +383,11 @@ export class DistributionService {
       const row = (await c.query('select status, name from campaigns where id = $1 for update', [id])).rows[0];
       if (row.status !== 'DRAFT') throw new ConflictException('لا تُعدَّل الحملة إلا وهي مسودة');
       await c.query('delete from entitlements where campaign_id = $1', [id]);
-      await c.query('update campaigns set name = $2, program_id = $3, unit = $4, starts_on = $5, ends_on = $6, fund_id = $7, selection = $8 where id = $1',
-        [id, input.name, program.id, program.unit, input.startsOn, input.endsOn, input.fundId ?? null, JSON.stringify(selection)]);
+      await this.programLock(c, program.id);
+      await c.query('update campaigns set name = $2, program_id = $3, unit = $4, starts_on = $5, ends_on = $6, fund_id = $7, selection = $8, updated_by = $9 where id = $1',
+        [id, input.name, program.id, program.unit, input.startsOn, input.endsOn, input.fundId ?? null, JSON.stringify(selection), actor.id]);
       await this.fill(c, id, list, input.pointIds);
+      await this.guardOverlap(c, id, program.id);
       await c.query('delete from campaign_point_agents where campaign_id = $1 and point_id <> all($2::uuid[])', [id, input.pointIds]);
       await this.audit.append(c, {
         actorId: actor.id, action: 'campaign.update', entity: 'campaign', entityId: id,
@@ -601,7 +641,11 @@ export class DistributionService {
     }
     try {
       await this.db.tx(async (tx) => {
-        await tx.query('select 1 from campaigns where id = $1 for update', [id]);
+        await this.programLock(tx, camp.program_id);
+        // الحال تُفحص ثانية والسجل مقفل: قد تكون أُرسلت للاعتماد بين القراءة والكتابة.
+        const now = (await tx.query('select status from campaigns where id = $1 for update', [id])).rows[0];
+        if (now?.status !== 'DRAFT') throw new ConflictException('العوائل تُضاف وتُحذف والحملة مسودة فقط');
+        await tx.query('update campaigns set updated_by = $2 where id = $1', [id, actor.id]);
         // إلى أقل النقاط حملاً، ليبقى التقسيم متساوياً.
         const point = (await tx.query(
           `select p.point_id from (select distinct point_id from entitlements where campaign_id = $1) p
@@ -613,6 +657,7 @@ export class DistributionService {
         await tx.query(
           `update campaigns set selection = jsonb_set(jsonb_set(selection, '{include}', (select coalesce(jsonb_agg(distinct x), '[]') from jsonb_array_elements_text(coalesce(selection->'include', '[]') || to_jsonb($2::text)) x)),
              '{exclude}', (select coalesce(jsonb_agg(x), '[]') from jsonb_array_elements_text(coalesce(selection->'exclude', '[]')) x where x <> $2)) where id = $1`, [id, no]);
+        await this.guardOverlap(tx, id, camp.program_id);
         await this.audit.append(tx, { actorId: actor.id, action: 'campaign.add_family', entity: 'campaign', entityId: id, payload: { familyNo: no, quantity: c.quantity } });
       });
     } catch (err: any) {
@@ -633,6 +678,7 @@ export class DistributionService {
       const gone = await tx.query(
         'delete from entitlements e using families f where e.id = $1 and e.campaign_id = $2 and f.id = e.family_id returning f.family_no', [entitlementId, id]);
       if (!gone.rowCount) throw new NotFoundException('العائلة ليست في هذه الحملة');
+      await tx.query('update campaigns set updated_by = $2 where id = $1', [id, actor.id]);
       // تخرج من المضافات والمرشَّحات إن كانت منها، وتدخل المستثنيات لئلا تعيدها القواعد.
       await tx.query(
         `update campaigns set selection = selection
@@ -729,7 +775,7 @@ export class DistributionService {
 
   submit(id: string, actor: AuthUser) {
     return this.transition(id, actor, ['DRAFT'], async (c) => {
-      await c.query("update campaigns set status = 'PENDING_APPROVAL' where id = $1", [id]);
+      await c.query("update campaigns set status = 'PENDING_APPROVAL', submitted_by = $2 where id = $1", [id, actor.id]);
       await this.audit.append(c, { actorId: actor.id, action: 'campaign.submit', entity: 'campaign', entityId: id });
     });
   }
@@ -745,6 +791,8 @@ export class DistributionService {
   private decideTx(id: string, approve: boolean, note: string | undefined, actor: AuthUser) {
     return this.transition(id, actor, ['PENDING_APPROVAL'], async (c, row) => {
       if (row.created_by === actor.id) throw new ForbiddenException('لا يعتمد الموظف حملة أنشأها بنفسه');
+      // ومن عدّل مسودة غيره أو أرسلها فقد صار من أصحابها: لو اعتمدها لاعتمد عمل يده.
+      if (approve && (row.updated_by === actor.id || row.submitted_by === actor.id)) throw new ForbiddenException('لا يعتمد الحملة من عدّل مسودتها أو أرسلها للاعتماد');
       if (!approve && !note) throw new BadRequestException('يلزم ذكر سبب الرفض');
       if (approve) {
         if (row.fund_id) {
@@ -777,6 +825,9 @@ export class DistributionService {
   /** الإقفال: ما لم يُستلم يُلغى، فلا يُقبل رمزه بعد. */
   close(id: string, actor: AuthUser) {
     return this.transition(id, actor, ['ACTIVE'], async (c) => {
+      // كشف دفع نُفّذ عند المزوّد ولم يُعتمد بعد: لو أُقفلت الحملة لأُلغيت استحقاقاته وبقي ما دُفع بلا قيد.
+      const open = (await c.query("select no from payout_batches where campaign_id = $1 and status = 'PENDING_APPROVAL' order by no limit 1", [id])).rows[0];
+      if (open) throw new ConflictException(`في الحملة كشف دفع رقم ${open.no} لم يُفصل فيه. اعتمده أو ارفضه ثم أقفل الحملة.`);
       const left = await c.query("update entitlements set status = 'CANCELLED' where campaign_id = $1 and status = 'PENDING'", [id]);
       await c.query("update campaigns set status = 'CLOSED', closed_by = $2, closed_at = now() where id = $1", [id, actor.id]);
       await this.audit.append(c, { actorId: actor.id, action: 'campaign.close', entity: 'campaign', entityId: id, payload: { undelivered: left.rowCount } });
@@ -817,7 +868,7 @@ export class DistributionService {
       campaignId: id, campaignName: camp.rows[0].name, unit: camp.rows[0].unit, pointId, lane, lanes,
       publicKey: this.signer.publicKeyB64, endsAt: Math.floor(end.getTime() / 1000),
       entries: mine.map((r) => ({
-        id: r.id, familyNo: r.family_no, headName: r.head_name, quantity: r.quantity, codeHash: r.code_hash, status: r.status,
+        id: r.id, familyNo: r.family_no, headName: r.head_name, quantity: r.quantity, status: r.status,
         codeCheck: r.code_enc ? codeCheckFor(r.id, this.crypto.decrypt(r.code_enc)) : null,
         receivers: [{ kind: 'HEAD' as const, name: r.head_name }, ...proxies.rows.filter((p) => p.family_id === r.family_id).map((p) => ({ kind: 'PROXY' as const, name: p.full_name }))],
       })),
@@ -830,7 +881,7 @@ export class DistributionService {
     // معرّف الحملة قد يكون ادّعاءً من رمز مزوَّر، فلا يُكتب إلا إن وُجدت حملة به.
     await this.db.query(
       `insert into delivery_incidents (kind, entitlement_id, campaign_id, point_id, device_id, reported_by, details)
-       values ($1, $2, (select id from campaigns where id = $3), $4, $5, $6, $7)`,
+       values ($1, $2, (select id from campaigns where id = $3), (select id from distribution_points where id = $4), $5, $6, $7)`,
       [kind, row?.id ?? null, row?.campaign_id ?? null, st.pointId, st.deviceId, st.actor.id, JSON.stringify(details)],
     );
   }
@@ -852,7 +903,7 @@ export class DistributionService {
   }
 
   /** يجد الاستحقاق من الرمز أو من رقم العائلة ورمزها الرقمي، ويتحقق أنه يُقبل الآن. كل رفض يُسجَّل. */
-  private async locate(q: { query: (t: string, p?: any[]) => Promise<{ rows: any[] }> }, input: CheckInput['locate'], lock: boolean) {
+  private async locate(q: Querier, input: CheckInput['locate'], lock: boolean, st: Station, sameOp?: string) {
     let row: any;
     // «no key update» يقفل السجل دون أن يحجب فحص المفاتيح الأجنبية عن غيره.
     const tail = lock ? ' for no key update of e' : '';
@@ -863,11 +914,15 @@ export class DistributionService {
       row = (await q.query(`${ENT_SQL} where e.id = $1${tail}`, [payload.e])).rows[0];
       if (!row || row.campaign_id !== payload.c) this.refuse('BAD_SIGNATURE', { campaign_id: payload.c });
     } else {
-      row = (await q.query(`${ENT_SQL} where e.campaign_id = $1 and f.family_no = $2${tail}`, [input.campaignId, toAsciiDigits(input.familyNo).trim()])).rows[0];
+      const familyNo = toAsciiDigits(input.familyNo).trim().slice(0, 20);
+      await this.codeThrottle(q, st, input.campaignId, familyNo);
+      row = (await q.query(`${ENT_SQL} where e.campaign_id = $1 and f.family_no = $2${tail}`, [input.campaignId, familyNo])).rows[0];
       if (!row || !row.code_hash || row.code_hash !== this.codeHash(input.campaignId, row.family_no, input.code)) {
-        this.refuse('BAD_CODE', row ?? { campaign_id: input.campaignId });
+        this.refuse('BAD_CODE', row ?? { campaign_id: input.campaignId }, { familyNo });
       }
     }
+    // الطلب نفسه أُعيد (انقطع جوابه في الطريق): ليس عرضاً ثانياً للرمز، فلا رفض ولا بلاغ.
+    if (row.status === 'DELIVERED' && sameOp && row.client_op_id === sameOp) return row;
     if (row.status === 'DELIVERED') {
       this.refuse('ALREADY_DELIVERED', row, { familyNo: row.family_no, deliveredAt: row.delivered_at, point: row.delivered_point_name, receiverName: row.receiver_name, receiver: row.receiver });
     }
@@ -883,6 +938,26 @@ export class DistributionService {
     return row;
   }
 
+  /**
+   * الرمز الرقمي ثماني خانات: من جرّب بلا حدّ بلغه. فيُحدّ ما يخطئه الموظف الواحد وما يُخطأ على رقم العائلة الواحد.
+   * ومن بلغ الحدّ بقي له الرمز المصوَّر، وهو موقَّع لا يُخمَّن.
+   */
+  private async codeThrottle(q: Querier, st: Station, campaignId: string, familyNo: string) {
+    const { rows } = await q.query(
+      `select count(*) filter (where reported_by = $1 and at > now() - interval '10 minutes')::int as mine,
+              count(*) filter (where campaign_id = $2 and details->>'familyNo' = $3)::int as family
+       from delivery_incidents where kind = 'BAD_CODE' and at > now() - interval '1 hour'`, [st.actor.id, campaignId, familyNo]);
+    if (rows[0].mine >= CODE_TRIES_PER_STAFF || rows[0].family >= CODE_TRIES_PER_FAMILY) {
+      throw new HttpException({ message: 'محاولات خاطئة كثيرة للرمز الرقمي. انتظر قليلاً، أو اقرأ الرمز المصوَّر.', code: 'CODE_LOCKED' }, 429);
+    }
+  }
+
+  /** النقطة التي يدّعيها الجهاز يجب أن تكون نقطة قائمة: معرّف مختلَق كان يُفشل تسجيل البلاغ نفسه فيسقط الطلب بخطأ خادم. */
+  private async station(actor: AuthUser, pointId: string, deviceId: string): Promise<Station> {
+    if (!(await this.db.query('select 1 from distribution_points where id = $1', [pointId])).rowCount) throw new BadRequestException('نقطة التوزيع غير معروفة');
+    return { actor, pointId, deviceId };
+  }
+
   private async receivers(familyId: string, headName: string) {
     const { rows } = await this.db.query('select id, full_name, relation from proxies where family_id = $1 and active order by full_name', [familyId]);
     return [{ kind: 'HEAD' as const, name: headName }, ...rows.map((p) => ({ kind: 'PROXY' as const, proxyId: p.id as string, name: p.full_name as string, relation: p.relation as string | null }))];
@@ -890,8 +965,8 @@ export class DistributionService {
 
   /** يتحقق من الرمز ويعرض من يجوز له الاستلام، دون أن يغيّر شيئاً. */
   async check(input: CheckInput, actor: AuthUser) {
-    const st = { actor, pointId: input.pointId, deviceId: input.deviceId };
-    const row = await this.guarded(st, () => this.locate(this.db, input.locate, false));
+    const st = await this.station(actor, input.pointId, input.deviceId);
+    const row = await this.guarded(st, () => this.locate(this.db, input.locate, false, st));
     await this.agentGuard(actor, input.pointId, row.point_id, row.campaign_id);
     return {
       entitlementId: row.id, familyId: row.family_id, familyNo: row.family_no, headName: row.head_name, quantity: row.quantity, unit: row.unit,
@@ -914,13 +989,15 @@ export class DistributionService {
 
   /** التسليم والجهاز متصل: يُقبل الرمز في أي نقطة، ويُبطَل في الجميع لحظتها. */
   async redeem(input: RedeemInput, actor: AuthUser) {
-    const st = { actor, pointId: input.pointId, deviceId: input.deviceId };
+    const st = await this.station(actor, input.pointId, input.deviceId);
     const prior = await this.db.query('select id from entitlements where client_op_id = $1', [input.clientOpId]);
     if (prior.rows[0]) return this.delivered(prior.rows[0].id);
 
     const id = await this.guarded(st, () => this.db.tx(async (c) => {
-      const row = await this.locate(c, input.locate, true);
-      await this.agentGuard(actor, input.pointId, row.point_id, row.campaign_id);
+      const row = await this.locate(c, input.locate, true, st, input.clientOpId);
+      // طلبان بالمعرّف نفسه وصلا معاً: الثاني ينتظر قفل السجل ثم يجده مسلَّماً بطلبه هو، فيُجاب بما أُجيب به الأول.
+      if (row.status === 'DELIVERED') return row.id as string;
+      await this.agentGuard(actor, input.pointId, row.point_id, row.campaign_id, c);
       let receiverName: string = row.head_name;
       if (input.receiver.kind === 'PROXY') {
         const p = await c.query('select full_name from proxies where id = $1 and family_id = $2 and active', [input.receiver.proxyId, row.family_id]);
@@ -967,57 +1044,128 @@ export class DistributionService {
    * تسليم ثانٍ لاستحقاق سُلِّم، أو تسليم في غير النقطة المعيَّنة.
    */
   async sync(input: SyncInput, actor: AuthUser) {
-    const st = { actor, pointId: input.pointId, deviceId: input.deviceId };
+    const st = await this.station(actor, input.pointId, input.deviceId);
     await this.agentGuard(actor, input.pointId);
-    const results: { clientOpId: string; result: 'APPLIED' | 'ALREADY_SYNCED' | 'CONFLICT' | 'UNKNOWN'; details?: unknown }[] = [];
+    const results: ({ clientOpId: string } & SyncResult)[] = [];
     for (const item of input.items) {
-      const result = await this.db.tx(async (c) => {
-        const row = (await c.query(`${ENT_SQL} where e.id = $1 for no key update of e`, [item.entitlementId])).rows[0];
-        if (!row) return { result: 'UNKNOWN' as const };
-        if (row.status === 'DELIVERED') {
-          if (row.client_op_id === item.clientOpId) return { result: 'ALREADY_SYNCED' as const };
-          const details = {
-            familyNo: row.family_no,
-            first: { at: row.delivered_at, point: row.delivered_point_name, receiverName: row.receiver_name, mode: row.mode },
-            second: { at: item.deliveredAt, receiverName: item.receiverName },
-          };
-          await c.query(
-            'insert into delivery_incidents (kind, entitlement_id, campaign_id, point_id, device_id, reported_by, details) values ($1,$2,$3,$4,$5,$6,$7)',
-            ['DOUBLE_DELIVERY', row.id, row.campaign_id, st.pointId, st.deviceId, actor.id, JSON.stringify(details)],
-          );
-          await this.audit.append(c, { actorId: actor.id, action: 'delivery.double', entity: 'entitlement', entityId: row.id, payload: details });
-          return { result: 'CONFLICT' as const, details };
+      let result: SyncResult;
+      try {
+        result = await this.db.tx((c) => this.syncOne(c, item, st));
+      } catch (err) {
+        // بند فاسد لا يوقف ما بعده: يُجاب عنه وحده. ما رُفض لسبب لا يزول لا يعيده الجهاز، وما تعذّر مؤقتاً يعيده.
+        if (err instanceof HttpException && err.getStatus() < 500) {
+          const body = err.getResponse() as { message?: string } | string;
+          result = { result: 'REJECTED', reason: 'REFUSED', message: typeof body === 'string' ? body : body.message ?? err.message };
+        } else {
+          this.logger.error(`sync item ${item.clientOpId} failed`, err instanceof Error ? err.stack : String(err));
+          result = { result: 'FAILED', message: 'تعذّر تسجيل هذا التسليم الآن' };
         }
-        const at = new Date(Math.min(new Date(item.deliveredAt).getTime(), Date.now()));
-        await c.query(
-          `update entitlements set status = 'DELIVERED', delivered_at = $2, delivered_by = $3, delivered_point = $4, device_id = $5,
-                  mode = 'OFFLINE', receiver = $6, receiver_name = $7, client_op_id = $8 where id = $1`,
-          [row.id, at.toISOString(), actor.id, st.pointId, st.deviceId, item.receiver, item.receiverName, item.clientOpId],
-        );
-        if (row.point_id !== st.pointId) {
-          await c.query(
-            'insert into delivery_incidents (kind, entitlement_id, campaign_id, point_id, device_id, reported_by, details) values ($1,$2,$3,$4,$5,$6,$7)',
-            ['WRONG_POINT_OFFLINE', row.id, row.campaign_id, st.pointId, st.deviceId, actor.id, JSON.stringify({ familyNo: row.family_no, assignedPoint: row.assigned_point_name })],
-          );
-        }
-        await this.inventory.issueForDelivery(c, { id: row.id, campaignId: row.campaign_id, programId: row.program_id, pointId: st.pointId, quantity: row.quantity, actorId: actor.id });
-        await this.accounting.disburseForDelivery(c, { entitlementId: row.id, campaignId: row.campaign_id, quantity: row.quantity, actorId: actor.id, familyNo: row.family_no });
-        await this.audit.append(c, {
-          actorId: actor.id, action: 'delivery.sync', entity: 'entitlement', entityId: row.id,
-          payload: { familyNo: row.family_no, campaignId: row.campaign_id, pointId: st.pointId, deviceId: st.deviceId, receiver: item.receiver, receiverName: item.receiverName, deliveredAt: at.toISOString() },
-        });
-        return { result: 'APPLIED' as const };
-      });
-      if (result.result === 'APPLIED') await this.confirm(item.entitlementId);
+      }
+      // رسالة التأكيد بعد ثبوت التسليم؛ وتعذّرها لا يُسقط ما بقي من البنود.
+      if (result.result === 'APPLIED') await this.confirm(item.entitlementId).catch((err) => this.logger.error('delivery confirmation failed', err instanceof Error ? err.stack : String(err)));
       results.push({ clientOpId: item.clientOpId, ...result });
     }
-    return { applied: results.filter((r) => r.result === 'APPLIED').length, conflicts: results.filter((r) => r.result === 'CONFLICT').length, results };
+    const count = (r: SyncResult['result']) => results.filter((x) => x.result === r).length;
+    return { applied: count('APPLIED'), conflicts: count('CONFLICT'), rejected: count('REJECTED'), results };
+  }
+
+  /** هل يثبت البرهان أن رمز هذه العائلة حضر عند التسليم؟ الرمز المصوَّر موقَّع لا يُصنع، والرقمي يُطابَق ببصمته في القاعدة. */
+  private proves(proof: SyncItem['proof'], row: any): 'TOKEN' | 'CODE' | null {
+    if (!proof) return null;
+    if ('token' in proof) {
+      const p = verifyToken(proof.token, this.signer.publicKeyB64);
+      return p && p.e === row.id && p.c === row.campaign_id ? 'TOKEN' : null;
+    }
+    return row.code_hash && row.code_hash === this.codeHash(row.campaign_id, row.family_no, proof.code) ? 'CODE' : null;
+  }
+
+  /**
+   * بند واحد من المزامنة، في معاملته. الجهاز المنقطع يحكم بما عنده، والخادم لا يصدّقه بلا برهان:
+   * لا يُسجَّل تسليم إلا ومعه رمز العائلة نفسه، ولا يُسجَّل لاستحقاق أُلغي أو حملة ليست جارية. وكل رفض بلاغ باسم الموظف والجهاز.
+   */
+  private async syncOne(c: PoolClient, item: SyncItem, st: Station): Promise<SyncResult> {
+    const actor = st.actor;
+    const row = (await c.query(`${ENT_SQL} where e.id = $1 for no key update of e`, [item.entitlementId])).rows[0];
+    if (!row) return { result: 'UNKNOWN' };
+    if (row.status === 'DELIVERED' && row.client_op_id === item.clientOpId) return { result: 'ALREADY_SYNCED' };
+
+    const claim = { familyNo: row.family_no, claimedAt: item.deliveredAt, receiver: item.receiver, receiverName: cleanName(item.receiverName) };
+    const note = (kind: IncidentKind, details: Record<string, unknown>) => c.query(
+      'insert into delivery_incidents (kind, entitlement_id, campaign_id, point_id, device_id, reported_by, details) values ($1,$2,$3,$4,$5,$6,$7)',
+      [kind, row.id, row.campaign_id, st.pointId, st.deviceId, actor.id, JSON.stringify(details)]);
+    const refuse = async (kind: IncidentKind, reason: string, message: string, details: Record<string, unknown> = {}): Promise<SyncResult> => {
+      await note(kind, { ...claim, ...details, offline: true, applied: false });
+      await this.audit.append(c, { actorId: actor.id, action: 'delivery.offline_refused', entity: 'entitlement', entityId: row.id, payload: { ...claim, ...details, reason, pointId: st.pointId, deviceId: st.deviceId } });
+      return { result: 'REJECTED', reason, message };
+    };
+
+    const proof = this.proves(item.proof, row);
+    if (!proof) return refuse('UNPROVEN_OFFLINE', 'NO_PROOF', MESSAGES.UNPROVEN_OFFLINE, { proof: !item.proof ? 'NONE' : 'token' in item.proof ? 'BAD_TOKEN' : 'BAD_CODE' });
+
+    // المتعهد لا يسلّم إلا من حصته، متصلاً كان أو منقطعاً.
+    await this.agentGuard(actor, st.pointId, undefined, row.campaign_id, c);
+    if (actor.role === 'DISTRIBUTION_AGENT' && row.point_id !== st.pointId) {
+      return refuse('WRONG_POINT_OFFLINE', 'NOT_YOURS', 'لم يُسجَّل: هذه العائلة ليست من حصتك', { assignedPoint: row.assigned_point_name });
+    }
+
+    if (row.status === 'DELIVERED') {
+      const details = {
+        familyNo: row.family_no,
+        first: { at: row.delivered_at, point: row.delivered_point_name, receiverName: row.receiver_name, mode: row.mode },
+        second: { at: item.deliveredAt, receiverName: claim.receiverName },
+      };
+      await note('DOUBLE_DELIVERY', details);
+      await this.audit.append(c, { actorId: actor.id, action: 'delivery.double', entity: 'entitlement', entityId: row.id, payload: details });
+      return { result: 'CONFLICT', details };
+    }
+    if (row.status === 'CANCELLED' || row.campaign_status !== 'ACTIVE') {
+      const closed = row.campaign_status === 'CLOSED';
+      return refuse(row.status === 'CANCELLED' && !closed ? 'CANCELLED' : 'NOT_ACTIVE', closed ? 'CAMPAIGN_CLOSED' : row.status === 'CANCELLED' ? 'CANCELLED' : 'NOT_ACTIVE',
+        closed ? 'لم يُسجَّل: أُقفلت الحملة قبل أن يزامن الجهاز. راجع مدير التوزيع بهذا التسليم.' : row.status === 'CANCELLED' ? 'لم يُسجَّل: أُلغي هذا الاستحقاق' : 'لم يُسجَّل: الحملة ليست جارية',
+        { campaignStatus: row.campaign_status });
+    }
+
+    // وقت التسليم يدّعيه الجهاز: يُقبل ما وقع في مدة الحملة، وما خرج عنها بلاغ.
+    const now = Date.now();
+    const claimed = new Date(item.deliveredAt).getTime();
+    if (claimed > endOfDay(row.ends_on).getTime() + CLOCK_SLACK_MS) return refuse('EXPIRED', 'EXPIRED', 'لم يُسجَّل: وقت التسليم بعد انتهاء مدة الحملة');
+    let at = new Date(Math.min(claimed, now));
+    const from = new Date(row.campaign_decided_at ?? row.campaign_created_at).getTime();
+    if (claimed < from - CLOCK_SLACK_MS || claimed > now + CLOCK_SLACK_MS) {
+      // ساعة الجهاز لا يوثق بها: يُسجَّل التسليم بوقت وصوله، ويبقى ما ادّعاه الجهاز في البلاغ.
+      at = new Date(now);
+      await note('BAD_CLOCK', { ...claim, recordedAt: at.toISOString(), offline: true, applied: true });
+    }
+
+    // المستلم اسم من ملف العائلة إن طابقه؛ وإلا دخل ما كتبه الجهاز منقّىً من غير الحروف، فهو يدخل رسالة التأكيد.
+    let receiverName: string = row.head_name;
+    if (item.receiver === 'PROXY') {
+      const proxies = await c.query('select full_name from proxies where family_id = $1 order by active desc', [row.family_id]);
+      const want = normalizeName(item.receiverName);
+      receiverName = proxies.rows.find((p) => normalizeName(p.full_name) === want)?.full_name ?? claim.receiverName;
+    }
+
+    await c.query(
+      `update entitlements set status = 'DELIVERED', delivered_at = $2, delivered_by = $3, delivered_point = $4, device_id = $5,
+              mode = 'OFFLINE', receiver = $6, receiver_name = $7, client_op_id = $8 where id = $1`,
+      [row.id, at.toISOString(), actor.id, st.pointId, st.deviceId, item.receiver, receiverName, item.clientOpId],
+    );
+    if (row.point_id !== st.pointId) await note('WRONG_POINT_OFFLINE', { familyNo: row.family_no, assignedPoint: row.assigned_point_name, offline: true, applied: true });
+    await this.inventory.issueForDelivery(c, { id: row.id, campaignId: row.campaign_id, programId: row.program_id, pointId: st.pointId, quantity: row.quantity, actorId: actor.id });
+    await this.accounting.disburseForDelivery(c, { entitlementId: row.id, campaignId: row.campaign_id, quantity: row.quantity, actorId: actor.id, familyNo: row.family_no });
+    await this.audit.append(c, {
+      actorId: actor.id, action: 'delivery.sync', entity: 'entitlement', entityId: row.id,
+      payload: { familyNo: row.family_no, campaignId: row.campaign_id, pointId: st.pointId, deviceId: st.deviceId, receiver: item.receiver, receiverName, deliveredAt: at.toISOString(), proof },
+    });
+    return { result: 'APPLIED' };
   }
 
   /** صورة التسليم: تُرفق بملف العائلة وتُربط بالاستحقاق. */
   async proof(entitlementId: string, file: { buffer: Buffer; originalname: string } | undefined, actor: AuthUser) {
-    const { rows } = await this.db.query("select family_id from entitlements where id = $1 and status = 'DELIVERED'", [entitlementId]);
+    const { rows } = await this.db.query("select family_id, delivered_by from entitlements where id = $1 and status = 'DELIVERED'", [entitlementId]);
     if (!rows[0]) throw new NotFoundException('لا تسليم بهذا المعرّف');
+    // صورة الإثبات يرفعها من سلّم، أو مدير: لو استبدلها أي موظف لمُحي بها دليل على غيره.
+    if (rows[0].delivered_by !== actor.id && !['ADMIN', 'DISTRIBUTION_MANAGER'].includes(actor.role)) throw new ForbiddenException('صورة الإثبات يرفعها من سلّم');
     const a = await this.attachments.upload(rows[0].family_id, file, 'DELIVERY_PROOF', undefined, actor);
     await this.db.query('update entitlements set proof_attachment = $2 where id = $1', [entitlementId, a.id]);
     return { attachmentId: a.id };

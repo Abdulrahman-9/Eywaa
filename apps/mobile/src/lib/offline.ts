@@ -53,11 +53,15 @@ export function checkOffline(token: string, manifest: Manifest, deliveredIds: Se
   return settle(manifest.entries.find((e) => e.id === payload.e), deliveredIds, 'NOT_THIS_DEVICE');
 }
 
+/**
+ * برهان الرمز الرقمي في البيان ستة عشر بتاً فقط (انظر الخادم): يكفي ليصدّ الجهاز من يخمّن عند الشبّاك،
+ * ولا يُستخرج منه الرمز ولو جُرّبت الأرقام كلها. والحكم الأخير للخادم عند المزامنة.
+ */
 async function codeCheckFor(entitlementId: string, code: string): Promise<string> {
   const enc = new TextEncoder();
   const base = await crypto.subtle.importKey('raw', enc.encode(code.replace(/\D/g, '')), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: enc.encode(entitlementId), iterations: 1000, hash: 'SHA-256' }, base, 128);
-  return btoa(String.fromCharCode(...new Uint8Array(bits)));
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: enc.encode(entitlementId), iterations: 1000, hash: 'SHA-256' }, base, 16);
+  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** التحقق برقم العائلة ورمزها الرقمي والجهاز منقطع. الرقم الذي ليس في البيان والرمز الخاطئ بجواب واحد. */

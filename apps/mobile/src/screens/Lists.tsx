@@ -1,7 +1,7 @@
 import { app, useApp } from '../lib/store';
 import { Button, Notice, Screen, formatTime } from '../ui';
 
-const SYNC_AR = { PENDING: 'ينتظر الرفع', SYNCED: 'وصل الخادم', CONFLICT: 'سُلِّم قبلك', UNKNOWN: 'لا يعرفه الخادم' } as const;
+const SYNC_AR = { PENDING: 'ينتظر الرفع', SYNCED: 'وصل الخادم', CONFLICT: 'سُلِّم قبلك', UNKNOWN: 'لا يعرفه الخادم', REJECTED: 'لم يقبله الخادم' } as const;
 
 /** كشف اليوم: ما سلّمه هذا الجهاز، وما بقي من حصته. */
 export function Day({ onBack }: { onBack: () => void }) {
@@ -26,6 +26,7 @@ export function Day({ onBack }: { onBack: () => void }) {
               <span>العائلة {d.familyNo} · {d.quantity} {d.unit}{d.receiver === 'PROXY' && ' · وكيل'}</span>
               <span className={`font-semibold ${d.sync === 'SYNCED' ? 'text-brand-strong' : d.sync === 'PENDING' ? 'text-warn-ink' : 'text-danger'}`}>{SYNC_AR[d.sync]}</span>
             </div>
+            {d.sync === 'REJECTED' && <p className="mt-1 text-sm text-danger">{d.error} رُفع بلاغ إلى مدير التوزيع؛ راجعه بهذا التسليم.</p>}
             {d.sync === 'CONFLICT' && <p className="mt-1 text-sm text-danger">وجده الخادم مسلَّماً{d.conflict?.first?.receiverName ? ` إلى ${d.conflict.first.receiverName}` : ''}{d.conflict?.first?.point ? ` في ${d.conflict.first.point}` : ''}. رُفع بلاغ إلى مدير التوزيع.</p>}
           </li>
         ))}
@@ -40,7 +41,7 @@ const REG_AR: Record<string, string> = { PENDING_APPROVAL: 'بانتظار ال�
 /** ما على الجهاز من تسجيلات، وما ردّه الخادم منها. */
 export function Outbox({ onBack }: { onBack: () => void }) {
   const s = useApp();
-  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN');
+  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN' || d.sync === 'REJECTED');
   return (
     <Screen title="ما على الجهاز" onBack={onBack}>
       {conflicts.length > 0 && <Notice>{conflicts.length} تسليم خالف ما في الخادم. تفصيله في «كشف اليوم»، وقد رُفع به بلاغ.</Notice>}

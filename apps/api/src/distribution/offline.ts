@@ -13,7 +13,6 @@ export interface ManifestEntry {
   familyNo: string;
   headName: string;
   quantity: number;
-  codeHash: string | null;
   /** برهان الرمز الرقمي ليتحقق منه الجهاز وهو منقطع. null إن لم يكن للاستحقاق رمز رقمي. */
   codeCheck?: string | null;
   status: 'PENDING' | 'DELIVERED' | 'CANCELLED';
@@ -28,11 +27,15 @@ export interface Manifest {
   endsAt: number;
   entries: ManifestEntry[];
 }
-export interface LocalDelivery { entitlementId: string; deliveredAt: string; receiver: 'HEAD' | 'PROXY'; receiverName: string; clientOpId: string }
+export interface LocalDelivery {
+  entitlementId: string; deliveredAt: string; receiver: 'HEAD' | 'PROXY'; receiverName: string; clientOpId: string;
+  /** ما حضرت به العائلة: يُرفع مع التسليم ليتحقق منه الخادم، ثم يُمحى من الجهاز. */
+  proof?: { token: string } | { code: string };
+}
 
 export type OfflineCheck =
   | { ok: true; entry: ManifestEntry }
-  | { ok: false; reason: 'BAD_SIGNATURE' | 'OTHER_CAMPAIGN' | 'EXPIRED' | 'NOT_THIS_DEVICE' | 'ALREADY_DELIVERED' | 'CANCELLED' };
+  | { ok: false; reason: 'BAD_SIGNATURE' | 'OTHER_CAMPAIGN' | 'EXPIRED' | 'NOT_THIS_DEVICE' | 'ALREADY_DELIVERED' | 'CANCELLED' | 'BAD_CODE' };
 
 /** هل يقبل هذا الجهاز هذا الرمز الآن، وهو بلا اتصال؟ */
 export function checkOffline(token: string, manifest: Manifest, delivered: LocalDelivery[], nowSec: number): OfflineCheck {
@@ -57,12 +60,13 @@ export const laneOf = (indexInPoint: number, lanes: number) => (indexInPoint % l
 const CODE_ROUNDS = 1000;
 
 /**
- * برهان الرمز الرقمي في بيان الجهاز. مشتقّ بطيء مملَّح بمعرّف الاستحقاق.
- * حدّه: الرمز ثماني خانات، فمن استخرج البيان من الجهاز قدر أن يجرّب الأرقام كلها.
- * فهو يصدّ من يخمّن رمز غيره عند الشبّاك، لا موظفاً يعبث بجهازه؛ وذاك تكشفه رسالة التأكيد التي تصل العائلة.
+ * برهان الرمز الرقمي في بيان الجهاز: ستة عشر بتاً فقط من مشتقّ بطيء مملَّح بمعرّف الاستحقاق.
+ * البتر مقصود. لو حُمل المشتقّ كاملاً لقدر من استخرج البيان من الجهاز أن يجرّب مئة مليون رمز فيعرف رمز كل عائلة.
+ * وبالبتر يطابق كلَّ برهان نحو 1500 رمز، فلا يُعرف منه الرمز؛ ويبقى كافياً ليصدّ الجهاز من يخمّن عند الشبّاك
+ * (يصيب تخمينه مرة من 65,536). والحكم الأخير للخادم: عند المزامنة يُطابَق الرمز نفسه ببصمته الكاملة.
  */
 export function codeCheckFor(entitlementId: string, code: string): string {
-  return pbkdf2Sync(code.replace(/\D/g, ''), entitlementId, CODE_ROUNDS, 16, 'sha256').toString('base64');
+  return pbkdf2Sync(code.replace(/\D/g, ''), entitlementId, CODE_ROUNDS, 2, 'sha256').toString('hex');
 }
 
 /** التحقق برقم العائلة والرمز الرقمي والجهاز منقطع. */
@@ -70,7 +74,7 @@ export function checkOfflineCode(familyNo: string, code: string, manifest: Manif
   if (nowSec > manifest.endsAt) return { ok: false, reason: 'EXPIRED' };
   const entry = manifest.entries.find((e) => e.familyNo === familyNo.trim());
   // رقم ليس في البيان ورمز خاطئ يُجابان بجواب واحد، فلا يُعرف منه أيّ الأرقام في هذا الشبّاك.
-  if (!entry || !entry.codeCheck || entry.codeCheck !== codeCheckFor(entry.id, code)) return { ok: false, reason: 'BAD_SIGNATURE' };
+  if (!entry || !entry.codeCheck || entry.codeCheck !== codeCheckFor(entry.id, code)) return { ok: false, reason: 'BAD_CODE' };
   if (entry.status === 'CANCELLED') return { ok: false, reason: 'CANCELLED' };
   if (entry.status === 'DELIVERED' || delivered.some((d) => d.entitlementId === entry.id)) return { ok: false, reason: 'ALREADY_DELIVERED' };
   return { ok: true, entry };

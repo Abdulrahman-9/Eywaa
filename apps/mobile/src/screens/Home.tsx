@@ -20,7 +20,7 @@ export function Home({ go }: { go: (r: Route) => void }) {
   const s = useApp();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const pending = pendingCount(s);
-  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN').length + s.registrations.filter((r) => r.sync === 'REJECTED').length + s.visitReports.filter((r) => r.sync === 'REJECTED').length + s.cases.filter((c) => c.sync === 'REJECTED').length + rejectedOps(s);
+  const conflicts = s.deliveries.filter((d) => d.sync === 'CONFLICT' || d.sync === 'UNKNOWN' || d.sync === 'REJECTED').length + s.registrations.filter((r) => r.sync === 'REJECTED').length + s.visitReports.filter((r) => r.sync === 'REJECTED').length + s.cases.filter((c) => c.sync === 'REJECTED').length + rejectedOps(s);
   const custody = custodyOf(s);
   const unacked = (s.agentInfo?.goods.transfers.filter((t) => t.needsAck && !s.acks.some((a) => a.moveId === t.id)).length ?? 0);
   const staleBoxes = s.agentInfo?.boxes.filter((b) => b.stale && !s.collections.some((c) => c.boxId === b.id && c.sync === 'PENDING')).length ?? 0;
