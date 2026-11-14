@@ -29,6 +29,7 @@ export interface NavItem {
 export const NAV: NavItem[] = [
   { to: '/', label: 'الرئيسية', roles: 'ALL', icon: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
   { to: '/families', label: 'العوائل', roles: ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'DISTRIBUTION_MANAGER', 'PROJECT_SUPERVISOR', 'AUDITOR'], icon: 'M16 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M21 20v-1a4 4 0 0 0-3-3.9M15.5 4.2a3.5 3.5 0 0 1 0 6.6' },
+  { to: '/requests', label: 'طلبات التسجيل', roles: ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER', 'AUDITOR'], icon: 'M12 5v14M5 12h14M4 4h16v16H4z' },
   { to: '/review', label: 'الاعتماد والشبهات', roles: ['ADMIN', 'BENEFICIARY_SUPERVISOR'], badge: true, icon: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M8.5 12.5l2.5 2.5 4.5-5' },
   { to: '/scoring', label: 'النقاط والفئات', roles: ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'AUDITOR'], icon: 'M5 20V10M12 20V4M19 20v-7' },
   { to: '/programs', label: 'البرامج', roles: ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'AUDITOR'], icon: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01' },

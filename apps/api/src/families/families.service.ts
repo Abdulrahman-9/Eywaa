@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, OnModuleInit, forwardRef } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
@@ -6,6 +6,7 @@ import { canonicalId, editDistance, normalizeDocNumber, normalizeName, toAsciiDi
 import { FieldCrypto, mask } from '../common/crypto';
 import { formatFamilyNo } from '../common/family-no';
 import { Db } from '../db/db.module';
+import { QuickService } from '../quick/quick.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { SettingsService } from '../settings/settings.service';
 import { CreateFamilyInput, DocumentInput, documentKey, documentNumberKey } from './families.schema';
@@ -42,6 +43,7 @@ export class FamiliesService implements OnModuleInit {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(SettingsService) private readonly settings: SettingsService,
     @Inject(ScoringService) private readonly scoring: ScoringService,
+    @Inject(forwardRef(() => QuickService)) private readonly quick: QuickService,
   ) {}
 
   /** يضيف وثيقة هوية لفرد. قيد الفرادة في القاعدة يمنع تكرارها. */
@@ -214,6 +216,8 @@ export class FamiliesService implements OnModuleInit {
         if (flags > 0) {
           await c.query("update families set status = 'PENDING_DEDUPE_REVIEW' where id = $1", [id]);
         }
+
+        if (input.quickRequestId) await this.quick.complete(c, input.quickRequestId, id, actor);
 
         await this.audit.append(c, {
           actorId: actor.id, action: 'family.create', entity: 'family', entityId: id,

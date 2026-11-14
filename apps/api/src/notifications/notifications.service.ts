@@ -230,6 +230,16 @@ export class NotificationsService {
     return rows[0].id as string;
   }
 
+  /** رسالة إلى هاتف ليس لعائلة مسجَّلة بعد: دعوة صاحب طلب تسجيل سريع. تمرّ بالطابور نفسه. */
+  async direct(title: string, text: string, phone: string, quickRequestId: string) {
+    const { rows } = await this.db.query("insert into notifications (kind, title, body, audience, status, recipients) values ('MANUAL', $1, $2, '{}', 'SENT', 1) returning id", [title, text]);
+    await this.db.query(
+      "insert into messages (notification_id, quick_request_id, phone, text, status, chain, next_attempt_at) values ($1,$2,$3,$4,'QUEUED','{WHATSAPP,SMS}',now())",
+      [rows[0].id, quickRequestId, phone, text]);
+    if (!this.channels.current.live) while ((await this.processQueue(50, rows[0].id)) > 0);
+    return rows[0].id as string;
+  }
+
   async list() {
     const { rows } = await this.db.query(
       `select n.id, n.kind, n.title, n.status, n.recipients, n.created_at, u.username as created_by,

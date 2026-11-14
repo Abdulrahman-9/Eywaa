@@ -84,6 +84,8 @@ export const memberSchema = z.object({
 export const createFamilySchema = z
   .object({
     clientOpId: z.string().uuid().optional(),
+    /** الطلب السريع الذي تُستكمل به هذه الاستمارة: يُغلق بها. */
+    quickRequestId: z.string().uuid().optional(),
     tags: z.array(z.enum(['ORPHANS', 'WIDOW', 'DISABLED', 'SICK', 'DIVORCED', 'NEEDY', 'UNMARRIED'])).default([]),
     phone1: phone.optional(),
     phone2: phone.optional(),

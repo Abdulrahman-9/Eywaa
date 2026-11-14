@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Attachments } from '../components/Attachments';
 import { DocumentFields, isDocComplete, type DocDraft } from '../components/DocumentFields';
 import { useToast } from '../components/toast';
@@ -22,6 +22,8 @@ interface Draft {
   rationNumber: string; rationCenter: string; residenceNumber: string; residenceBy: string;
   members: MemberDraft[]; incomes: { kind: IncomeKind; amount: string }[];
   proxies: { fullName: string; phone: string; relation: string }[]; notes: string;
+  /** الطلب السريع الذي تُستكمل به هذه الاستمارة، ورقمه للعرض. */
+  quickRequestId?: string; quickNo?: number;
 }
 
 const emptyMember = (relation: Relation): MemberDraft => ({
@@ -51,6 +53,7 @@ function toPayload(d: Draft) {
   return {
     clientOpId: d.clientOpId,
     tags: d.tags,
+    quickRequestId: d.quickRequestId,
     phone1: opt(d.phone1), phone2: opt(d.phone2), hasWhatsapp: d.hasWhatsapp ?? true, prefersVoice: d.prefersVoice ?? false,
     address: { mahalla: opt(d.mahalla), street: opt(d.street), house: opt(d.house), landmark: opt(d.landmark) },
     housing: d.housing || undefined, housingOther: opt(d.housingOther),
@@ -121,7 +124,11 @@ export function Register() {
   const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<Draft>(loadDraft);
+  const quick = (useLocation().state as { quick?: { id: string; no: number; headName: string; phone: string | null; mahalla: string | null; landmark: string | null } } | null)?.quick;
+  // استكمال طلب سريع: تبدأ الاستمارة بما فيه، ويُغلق الطلب بحفظها.
+  const [draft, setDraft] = useState<Draft>(() => (quick
+    ? { ...emptyDraft(), quickRequestId: quick.id, quickNo: quick.no, phone1: quick.phone ?? '', mahalla: quick.mahalla ?? '', landmark: quick.landmark ?? '', members: [{ ...emptyMember('HEAD'), fullName: quick.headName }] }
+    : loadDraft()));
   const [step, setStep] = useState(0);
   const [dups, setDups] = useState<Record<number, boolean>>({});
   const [rationHit, setRationHit] = useState<{ found: boolean; familyId?: string; familyNo?: string } | null>(null);
@@ -192,8 +199,8 @@ export function Register() {
   return (
     <>
       <PageHeader
-        title="تسجيل عائلة"
-        description="على ترتيب الاستمارة الورقية. ما تكتبه محفوظ حتى تغلق التبويب."
+        title={draft.quickNo ? `استكمال طلب التسجيل ${draft.quickNo}` : 'تسجيل عائلة'}
+        description={draft.quickNo ? 'أكمل الاستمارة من وثائق العائلة. بحفظها يُغلق الطلب السريع.' : 'على ترتيب الاستمارة الورقية. ما تكتبه محفوظ حتى تغلق التبويب.'}
         action={<Button variant="ghost" onClick={() => { setDraft(emptyDraft()); setStep(0); setDups({}); }}>ابدأ من جديد</Button>}
       />
       <ol aria-label="خطوات التسجيل" className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
