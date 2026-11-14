@@ -40,7 +40,12 @@ export function Families() {
         title="العوائل"
         description="ابحث برقم العائلة أو الاسم أو الهاتف."
         action={user && CAN_REGISTER.includes(user.role) && (
-          <Link to="/families/new" className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-brand px-4 font-semibold text-white hover:bg-brand-strong">تسجيل عائلة</Link>
+          <div className="flex flex-wrap gap-2">
+            {user.role !== 'FIELD_RESEARCHER' && (
+              <Link to="/families/import" className="inline-flex min-h-11 items-center rounded-lg border border-line-strong bg-surface px-4 font-semibold hover:bg-ground">استيراد من Excel</Link>
+            )}
+            <Link to="/families/new" className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-brand px-4 font-semibold text-white hover:bg-brand-strong">تسجيل عائلة</Link>
+          </div>
         )}
       />
       <Card className="flex flex-wrap items-end gap-3">

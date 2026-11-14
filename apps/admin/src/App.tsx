@@ -11,6 +11,7 @@ import { Cashbox } from './pages/Cashbox';
 import { Desk } from './pages/Desk';
 import { Families } from './pages/Families';
 import { Family } from './pages/Family';
+import { Import } from './pages/Import';
 import { Notify } from './pages/Notify';
 import { Programs } from './pages/Programs';
 import { Register } from './pages/Register';
@@ -69,6 +70,7 @@ export function App() {
             />
           );
         })}
+        <Route path="/families/import" element={['ADMIN', 'BENEFICIARY_SUPERVISOR'].includes(user.role) ? <Import /> : FORBIDDEN} />
         <Route path="/families/new" element={REGISTRARS.includes(user.role) ? <Register /> : FORBIDDEN} />
         <Route path="/families/:id" element={canSee(NAV.find((n) => n.to === '/families')!, user.role) ? <Family /> : FORBIDDEN} />
         <Route path="/campaigns/:id" element={canSee(NAV.find((n) => n.to === '/campaigns')!, user.role) ? <Campaign /> : FORBIDDEN} />
