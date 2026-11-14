@@ -10,6 +10,7 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32),
   FIELD_ENC_KEY: key32,
   FIELD_HMAC_KEY: key32,
+  STORAGE_DIR: z.string().default('./storage'),
 });
 
 export type Config = z.infer<typeof schema>;

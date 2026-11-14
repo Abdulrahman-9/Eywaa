@@ -6,6 +6,7 @@ import { normalizeDocNumber, normalizeName, toAsciiDigits } from '../common/arab
 import { FieldCrypto, mask } from '../common/crypto';
 import { formatFamilyNo } from '../common/family-no';
 import { Db } from '../db/db.module';
+import { SettingsService } from '../settings/settings.service';
 import { CreateFamilyInput, DocumentInput, documentKey } from './families.schema';
 
 /** حدّ تشابه الاسم الكامل الذي تُرفع عنده شبهة التكرار. */
@@ -32,7 +33,27 @@ export class FamiliesService {
     @Inject(Db) private readonly db: Db,
     @Inject(FieldCrypto) private readonly crypto: FieldCrypto,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
+
+  /** يضيف وثيقة هوية لفرد. قيد الفرادة في القاعدة يمنع تكرارها. */
+  async insertDocument(c: PoolClient, personId: string, doc: DocumentInput) {
+    const d = doc as DocumentInput & { register?: string; page?: string; portfolio?: string };
+    await c.query(
+      `insert into person_documents (person_id, type, key_hash, number_enc, register, page, portfolio, issued_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        personId, d.type, this.crypto.blindIndex(documentKey(d)), this.crypto.encrypt(d.number),
+        d.register ?? null, d.page ?? null, d.portfolio ?? null, d.issuedAt ?? null,
+      ],
+    );
+  }
+
+  hashDocuments(members: { documents: DocumentInput[] }[]) {
+    return members.flatMap((m, memberIndex) =>
+      m.documents.map((d) => ({ memberIndex, doc: d, hash: this.crypto.blindIndex(documentKey(d)) })),
+    );
+  }
 
   // ---------- التسجيل ----------
 
@@ -44,9 +65,7 @@ export class FamiliesService {
     }
 
     const rationHash = input.rationCard ? this.crypto.blindIndex(`RC:${input.rationCard.number}`) : null;
-    const docs = input.members.flatMap((m, memberIndex) =>
-      m.documents.map((d) => ({ memberIndex, doc: d, hash: this.crypto.blindIndex(documentKey(d)) })),
-    );
+    const docs = this.hashDocuments(input.members);
 
     try {
       const familyId = await this.db.tx(async (c) => {
@@ -95,17 +114,7 @@ export class FamiliesService {
           personIds.push(p.rows[0].id);
         }
 
-        for (const d of docs) {
-          const doc = d.doc as DocumentInput & { register?: string; page?: string; portfolio?: string };
-          await c.query(
-            `insert into person_documents (person_id, type, key_hash, number_enc, register, page, portfolio, issued_at)
-             values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-            [
-              personIds[d.memberIndex], doc.type, d.hash, this.crypto.encrypt(doc.number),
-              doc.register ?? null, doc.page ?? null, doc.portfolio ?? null, doc.issuedAt ?? null,
-            ],
-          );
-        }
+        for (const d of docs) await this.insertDocument(c, personIds[d.memberIndex], d.doc);
         for (const inc of input.incomes) {
           await c.query('insert into income_sources (family_id, kind, amount_iqd, note) values ($1,$2,$3,$4)', [
             id, inc.kind, inc.amountIqd, inc.note ?? null,
@@ -143,14 +152,14 @@ export class FamiliesService {
     }
   }
 
-  private conflictError(conflicts: HardConflict[]) {
+  conflictError(conflicts: HardConflict[]) {
     return new ConflictException({
       message: 'مسجَّل سلفاً: وثيقة أو بطاقة تموينية موجودة في النظام',
       conflicts,
     });
   }
 
-  private async findHardConflicts(
+  async findHardConflicts(
     c: PoolClient,
     docs: { memberIndex: number; doc: DocumentInput; hash: string }[],
     rationHash: string | null,
@@ -256,6 +265,9 @@ export class FamiliesService {
     ]);
 
     const active = persons.rows.filter((p) => p.status === 'ACTIVE');
+    const monthlyIncomeIqd: number = incomes.rows.reduce((sum, r) => sum + r.amount_iqd, 0);
+    const povertyLineIqd = await this.settings.get<number>('poverty_line_iqd');
+    const perCapitaIncomeIqd = active.length ? Math.round(monthlyIncomeIqd / active.length) : null;
     return {
       id: f.id,
       familyNo: f.family_no,
@@ -282,7 +294,11 @@ export class FamiliesService {
         males: active.filter((p) => p.gender === 'M').length,
         females: active.filter((p) => p.gender === 'F').length,
       },
-      monthlyIncomeIqd: incomes.rows.reduce((sum, r) => sum + r.amount_iqd, 0),
+      monthlyIncomeIqd,
+      perCapitaIncomeIqd,
+      povertyLineIqd,
+      // شرط القبول في الاستمارة: دخل الفرد دون خط الفقر.
+      belowPovertyLine: perCapitaIncomeIqd === null ? null : perCapitaIncomeIqd < povertyLineIqd,
       members: persons.rows.map((p) => ({
         id: p.id,
         relation: p.relation,

@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { normalizeDocNumber, normalizeIraqiPhone } from '../common/arabic';
 
-const text = z.string().trim().min(1);
-const optionalText = z.string().trim().min(1).optional();
+export const text = z.string().trim().min(1);
+export const optionalText = z.string().trim().min(1).optional();
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'التاريخ بصيغة YYYY-MM-DD');
 
-const phone = z.string().transform((v, ctx) => {
+export const phone = z.string().transform((v, ctx) => {
   const normalized = normalizeIraqiPhone(v);
   if (!normalized) {
     ctx.addIssue({ code: 'custom', message: 'رقم هاتف عراقي غير صالح' });
@@ -56,7 +56,7 @@ export function documentKey(d: DocumentInput): string {
   }
 }
 
-const memberSchema = z.object({
+export const memberSchema = z.object({
   relation: z.enum(['HEAD', 'SPOUSE', 'SON', 'DAUGHTER', 'FATHER', 'MOTHER', 'BROTHER', 'SISTER', 'OTHER']),
   fullName: text,
   motherName: optionalText,

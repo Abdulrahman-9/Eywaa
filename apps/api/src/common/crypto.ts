@@ -24,6 +24,25 @@ export class FieldCrypto {
     return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
   }
 
+  /** تشفير ملف كامل (المرفقات). */
+  encryptBuffer(plain: Buffer): Buffer {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.encKey, iv);
+    const body = Buffer.concat([cipher.update(plain), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), body]);
+  }
+
+  decryptBuffer(raw: Buffer): Buffer {
+    const decipher = createDecipheriv('aes-256-gcm', this.encKey, raw.subarray(0, 12));
+    decipher.setAuthTag(raw.subarray(12, 28));
+    return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]);
+  }
+
+  /** توقيع قصير لروابط التنزيل المؤقتة. */
+  sign(value: string): string {
+    return createHmac('sha256', this.hmacKey).update(`sign:${value}`).digest('base64url');
+  }
+
   blindIndex(value: string): string {
     return createHmac('sha256', this.hmacKey).update(value).digest('hex');
   }

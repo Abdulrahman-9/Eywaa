@@ -2,6 +2,9 @@ import 'reflect-metadata';
 import { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { randomBytes } from 'crypto';
+import { mkdtempSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { Client } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -26,6 +29,7 @@ export async function startApp(): Promise<INestApplication> {
   process.env.JWT_SECRET = randomBytes(32).toString('hex');
   process.env.FIELD_ENC_KEY = randomBytes(32).toString('base64');
   process.env.FIELD_HMAC_KEY = randomBytes(32).toString('base64');
+  process.env.STORAGE_DIR = mkdtempSync(join(tmpdir(), 'eywaa-storage-'));
 
   await sql('drop schema public cascade; create schema public;');
   await migrate(TEST_DB);
