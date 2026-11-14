@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
 import { normalizeName } from '../common/arabic';
+import { FieldCrypto, mask } from '../common/crypto';
 import { Db } from '../db/db.module';
 import { documentSchema, memberSchema, optionalText, phone, text } from '../families/families.schema';
 import { FamiliesService } from '../families/families.service';
@@ -67,7 +68,23 @@ export class ChangesService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(FamiliesService) private readonly families: FamiliesService,
     @Inject(ScoringService) private readonly scoring: ScoringService,
+    @Inject(FieldCrypto) private readonly crypto: FieldCrypto,
   ) {}
+
+  /** أرقام الوثائق في طلب التعديل تُحفظ مشفّرة كما تُحفظ في سجل الفرد. */
+  private seal(type: ChangeType, payload: any): any {
+    const enc = (d: any) => ({ ...d, number: undefined, numberEnc: this.crypto.encrypt(d.number), numberMasked: mask(d.number) });
+    if (type === 'ADD_DOCUMENT') return { ...payload, document: enc(payload.document) };
+    if (type === 'ADD_MEMBER') return { member: { ...payload.member, documents: payload.member.documents.map(enc) } };
+    return payload;
+  }
+
+  private unseal(type: ChangeType, payload: any): any {
+    const dec = (d: any) => { const { numberEnc, numberMasked, ...rest } = d; return { ...rest, number: this.crypto.decrypt(numberEnc) }; };
+    if (type === 'ADD_DOCUMENT') return { ...payload, document: dec(payload.document) };
+    if (type === 'ADD_MEMBER') return { member: { ...payload.member, documents: payload.member.documents.map(dec) } };
+    return payload;
+  }
 
   async request(familyId: string, type: ChangeType, rawPayload: unknown, reason: string, actor: AuthUser) {
     const parsed = PAYLOADS[type].safeParse(rawPayload);
@@ -86,7 +103,7 @@ export class ChangesService {
       await this.precheck(c, familyId, type, payload);
       const { rows } = await c.query(
         'insert into change_requests (family_id, type, payload, reason, requested_by) values ($1,$2,$3,$4,$5) returning id',
-        [familyId, type, JSON.stringify(payload), reason, actor.id],
+        [familyId, type, JSON.stringify(this.seal(type, payload)), reason, actor.id],
       );
       await this.audit.append(c, {
         actorId: actor.id, action: 'change.request', entity: 'change_request', entityId: rows[0].id,
@@ -125,8 +142,9 @@ export class ChangesService {
 
         let before: unknown = null;
         if (approve) {
-          await this.precheck(c, req.family_id, req.type, req.payload);
-          before = await this.apply(c, req.family_id, req.type, req.payload);
+          const payload = this.unseal(req.type, req.payload);
+          await this.precheck(c, req.family_id, req.type, payload);
+          before = await this.apply(c, req.family_id, req.type, payload);
           // تغيّرت بيانات العائلة، فتُعاد نقاطها (لا أثر له إن لم تكن معتمدة).
           await this.scoring.recompute(c, req.family_id);
         }
@@ -235,9 +253,9 @@ const SELECT = `
   from change_requests r join families f on f.id = r.family_id
     join users ru on ru.id = r.requested_by left join users du on du.id = r.decided_by`;
 
-/** أرقام الوثائق لا تُعرض كاملة حتى في طلب التعديل. */
+/** في الطلب المحفوظ رقم الوثيقة مشفّر؛ ويُعرض منه آخر أربع خانات فقط. */
 function redact(type: string, payload: any) {
-  const hide = (d: any) => ({ ...d, number: `${'*'.repeat(Math.max(d.number.length - 4, 0))}${d.number.slice(-4)}` });
+  const hide = (d: any) => { const { numberEnc, numberMasked, ...rest } = d; return { ...rest, number: numberMasked }; };
   if (type === 'ADD_DOCUMENT') return { ...payload, document: hide(payload.document) };
   if (type === 'ADD_MEMBER') return { member: { ...payload.member, documents: payload.member.documents.map(hide) } };
   return payload;

@@ -8,12 +8,16 @@ export interface User {
   username: string;
   fullName: string;
   role: Role;
+  mustChangePassword?: boolean;
+  totpEnabled?: boolean;
+  totpRecommended?: boolean;
 }
 
 interface AuthState {
   user: User | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, code?: string) => Promise<void>;
+  refresh: () => Promise<void>;
   logout: () => void;
 }
 
@@ -36,13 +40,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api<User>('/auth/me').then(setUser).catch(() => {}).finally(() => setLoading(false));
   }, [logout]);
 
-  const login = useCallback(async (username: string, password: string) => {
-    const res = await api<{ token: string; user: User }>('/auth/login', { method: 'POST', body: { username, password } });
+  const refresh = useCallback(async () => { setUser(await api<User>('/auth/me')); }, []);
+
+  const login = useCallback(async (username: string, password: string, code?: string) => {
+    const res = await api<{ token: string; user: User }>('/auth/login', { method: 'POST', body: { username, password, code: code || undefined } });
     tokenStore.set(res.token);
     setUser(res.user);
-  }, []);
+    await refresh();
+  }, [refresh]);
 
-  const value = useMemo(() => ({ user, loading, login, logout }), [user, loading, login, logout]);
+  const value = useMemo(() => ({ user, loading, login, logout, refresh }), [user, loading, login, logout, refresh]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

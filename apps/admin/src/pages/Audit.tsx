@@ -15,6 +15,10 @@ interface Entry {
 
 const ACTIONS: Record<string, string> = {
   'auth.login': 'دخول',
+  'auth.locked': 'قفل حساب لكثرة المحاولات',
+  'auth.password_change': 'تغيير كلمة المرور',
+  'auth.totp_enable': 'تفعيل التحقق بعاملين',
+  'auth.totp_disable': 'تعطيل التحقق بعاملين',
   'user.create': 'إنشاء مستخدم',
   'user.update': 'تعديل مستخدم',
   'family.create': 'تسجيل عائلة',

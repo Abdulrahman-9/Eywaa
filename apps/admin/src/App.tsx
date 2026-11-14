@@ -1,4 +1,5 @@
 import { Link, Navigate, Route, Routes } from 'react-router-dom';
+import { PasswordForm } from './components/Account';
 import { Shell } from './components/Shell';
 import { Card, Skeleton } from './components/ui';
 import { useAuth } from './lib/auth';
@@ -44,6 +45,15 @@ export function App() {
   const { user, loading } = useAuth();
   if (loading) return <div className="p-8"><Skeleton className="h-8 w-64" /></div>;
   if (!user) return <Login />;
+  // الكلمة المؤقتة لا يُعمل بها: تُغيَّر أولاً.
+  if (user.mustChangePassword) {
+    return (
+      <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6">
+        <h1 className="text-2xl font-bold">ضع كلمة مرورك</h1>
+        <PasswordForm forced onDone={() => {}} />
+      </div>
+    );
+  }
   return (
     <Routes>
       <Route element={<Shell />}>

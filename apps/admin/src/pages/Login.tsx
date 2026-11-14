@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { AidMotif } from '../components/AidMotif';
 import { Alert, Button, Field, Input } from '../components/ui';
+import { ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
 export function Login() {
@@ -9,14 +10,19 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [code, setCode] = useState('');
+  const [needCode, setNeedCode] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await login(username.trim(), password);
+      await login(username.trim(), password, needCode ? code : undefined);
     } catch (err) {
+      const kind = err instanceof ApiError ? (err.details as { code?: string })?.code : undefined;
+      // الخطوة الثانية: الحساب محميّ برمز من تطبيق المصادقة.
+      if (kind === 'TOTP_REQUIRED') { setNeedCode(true); return; }
       setError(err instanceof Error ? err.message : 'تعذّر الدخول');
     } finally {
       setBusy(false);
@@ -43,7 +49,12 @@ export function Login() {
           <Field label="كلمة المرور">
             {(id) => <Input id={id} dir="ltr" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />}
           </Field>
-          <Button type="submit" disabled={busy || !username || !password}>{busy ? 'جارٍ الدخول…' : 'دخول'}</Button>
+          {needCode && (
+            <Field label="رمز التحقق من تطبيق المصادقة" hint="ستة أرقام تتبدل كل نصف دقيقة">
+              {(id) => <Input id={id} dir="ltr" inputMode="numeric" autoComplete="one-time-code" autoFocus className="text-center text-xl tracking-[0.4em]" value={code} onChange={(e) => setCode(e.target.value)} />}
+            </Field>
+          )}
+          <Button type="submit" disabled={busy || !username || !password || (needCode && code.replace(/\D/g, '').length !== 6)}>{busy ? 'جارٍ الدخول…' : 'دخول'}</Button>
         </form>
       </div>
     </div>

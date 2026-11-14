@@ -13,6 +13,8 @@ interface UserRow {
   role: Role;
   active: boolean;
   createdAt: string;
+  totpEnabled: boolean;
+  locked: boolean;
 }
 
 function fieldErrors(err: unknown): Record<string, string> {
@@ -73,11 +75,13 @@ export function Users() {
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [confirm, setConfirm] = useState<UserRow | null>(null);
+  const [resetting, setResetting] = useState<UserRow | null>(null);
+  const [temp, setTemp] = useState('');
   const users = useQuery({ queryKey: ['users'], queryFn: () => api<UserRow[]>('/users') });
   const update = useMutation({
-    mutationFn: (v: { id: string; body: { active?: boolean; role?: Role } }) => api(`/users/${v.id}`, { method: 'PATCH', body: v.body }),
+    mutationFn: (v: { id: string; body: { active?: boolean; role?: Role; password?: string; resetAccess?: true } }) => api(`/users/${v.id}`, { method: 'PATCH', body: v.body }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
-    onSettled: () => setConfirm(null),
+    onSettled: () => { setConfirm(null); setResetting(null); setTemp(''); },
   });
 
   return (
@@ -119,12 +123,16 @@ export function Users() {
                       </Select>
                     )}
                   </td>
-                  <td className="px-4 py-3">{u.active ? <Badge tone="ok">فعّال</Badge> : <Badge tone="danger">معطَّل</Badge>}</td>
+                  <td className="px-4 py-3"><div className="flex flex-wrap gap-1.5">{u.active ? <Badge tone="ok">فعّال</Badge> : <Badge tone="danger">معطَّل</Badge>}{u.locked && <Badge tone="warn">مقفل</Badge>}{u.totpEnabled && <Badge tone="info">بعاملين</Badge>}</div></td>
                   <td className="px-4 py-3 text-muted">{formatDateTime(u.createdAt)}</td>
                   <td className="px-4 py-2 text-end">
-                    {u.id === me?.id ? <span className="text-sm text-muted">حسابك</span>
-                      : u.active ? <Button variant="danger" onClick={() => setConfirm(u)}>تعطيل</Button>
-                      : <Button variant="secondary" onClick={() => update.mutate({ id: u.id, body: { active: true } })}>تفعيل</Button>}
+                    {u.id === me?.id ? <span className="text-sm text-muted">حسابك</span> : (
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button variant="secondary" onClick={() => setResetting(u)}>كلمة المرور والدخول</Button>
+                        {u.active ? <Button variant="danger" onClick={() => setConfirm(u)}>تعطيل</Button>
+                          : <Button variant="secondary" onClick={() => update.mutate({ id: u.id, body: { active: true } })}>تفعيل</Button>}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -134,6 +142,16 @@ export function Users() {
       </Card>
 
       <CreateUserDialog open={creating} onClose={() => setCreating(false)} />
+      <Dialog open={!!resetting} title={`كلمة المرور والدخول: ${resetting?.fullName ?? ''}`} onClose={() => { setResetting(null); setTemp(''); }}>
+        <Field label="كلمة مرور مؤقتة" hint="12 خانة على الأقل. يُلزم صاحبها بتغييرها عند أول دخول.">
+          {(id) => <Input id={id} dir="ltr" autoComplete="off" value={temp} onChange={(e) => setTemp(e.target.value)} />}
+        </Field>
+        <div className="flex justify-end"><Button disabled={temp.length < 12 || update.isPending} onClick={() => resetting && update.mutate({ id: resetting.id, body: { password: temp } })}>ضع الكلمة المؤقتة</Button></div>
+        <div className="flex flex-col gap-2 border-t border-line pt-4">
+          <p>لمن أُقفل حسابه أو فقد هاتف المصادقة: يُفكّ القفل ويُعطَّل التحقق بعاملين، فيدخل بكلمة مروره ثم يفعّله من جديد.</p>
+          <Button variant="danger" className="self-start" disabled={update.isPending} onClick={() => resetting && update.mutate({ id: resetting.id, body: { resetAccess: true } })}>فكّ القفل وعطّل العاملين</Button>
+        </div>
+      </Dialog>
       <Dialog open={!!confirm} title="تعطيل الحساب" onClose={() => setConfirm(null)}>
         <p>سيُمنع <strong>{confirm?.fullName}</strong> من الدخول فوراً، وتُقطع جلسته إن كان داخلاً. ولا يُحذف شيء مما عمله.</p>
         <div className="flex flex-wrap justify-end gap-3">

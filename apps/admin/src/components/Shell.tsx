@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { NAV, ROLE_LABEL, canSee } from '../lib/roles';
+import { AccountDialog } from './Account';
 import { Button, Icon } from './ui';
 
 export function Shell() {
   const { user, logout } = useAuth();
+  const [account, setAccount] = useState(false);
   const overview = useQuery({
     queryKey: ['overview'],
     queryFn: () => api<{ families: { pendingApproval: number }; openDuplicateFlags: number; pendingChangeRequests: number }>('/stats/overview'),
@@ -56,11 +59,13 @@ export function Shell() {
               <span className="text-sm text-muted">{ROLE_LABEL[user.role]}</span>
             </div>
           </div>
+          <Button variant="ghost" onClick={() => setAccount(true)}>حسابي{user.totpRecommended && !user.totpEnabled ? ' ●' : ''}</Button>
           <Button variant="secondary" onClick={logout}>تسجيل الخروج</Button>
         </header>
         <main className="flex flex-col gap-6 px-4 py-6 md:px-8">
           <Outlet />
         </main>
+        <AccountDialog open={account} onClose={() => setAccount(false)} />
       </div>
     </div>
   );

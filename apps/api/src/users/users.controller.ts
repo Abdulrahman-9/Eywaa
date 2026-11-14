@@ -12,7 +12,14 @@ const createSchema = z.object({
   password: z.string().min(12, 'كلمة المرور 12 خانة على الأقل'),
   role: z.enum(ROLES),
 });
-const updateSchema = z.object({ active: z.boolean().optional(), role: z.enum(ROLES).optional() });
+const updateSchema = z.object({
+  active: z.boolean().optional(),
+  role: z.enum(ROLES).optional(),
+  /** كلمة مرور مؤقتة: يُلزم صاحبها بتغييرها عند أول دخول. */
+  password: z.string().min(12, 'كلمة المرور 12 خانة على الأقل').optional(),
+  /** يفكّ قفل الحساب ويعطّل التحقق بعاملين (لمن فقد هاتفه). */
+  resetAccess: z.literal(true).optional(),
+});
 
 @Controller('users')
 @Roles('ADMIN')
@@ -25,7 +32,7 @@ export class UsersController {
   @Get()
   async list() {
     const { rows } = await this.db.query(
-      'select id, username, full_name as "fullName", role, active, created_at as "createdAt" from users order by created_at',
+      'select id, username, full_name as "fullName", role, active, created_at as "createdAt", totp_enabled as "totpEnabled", (locked_until is not null and locked_until > now()) as locked from users order by created_at',
     );
     return rows;
   }
@@ -69,13 +76,19 @@ export class UsersController {
     @CurrentUser() actor: AuthUser,
   ) {
     if (id === actor.id) throw new ConflictException('لا يعدّل المدير حسابه بنفسه');
+    const passwordHash = body.password ? await hashPassword(body.password) : null;
     return this.db.tx(async (c) => {
       const { rows } = await c.query(
-        'update users set active = coalesce($2, active), role = coalesce($3, role) where id = $1 returning id, username, role, active',
-        [id, body.active ?? null, body.role ?? null],
+        `update users set active = coalesce($2, active), role = coalesce($3, role),
+                password_hash = coalesce($4, password_hash), must_change_password = must_change_password or $4 is not null,
+                failed_logins = case when $5 then 0 else failed_logins end, locked_until = case when $5 then null else locked_until end,
+                totp_enabled = case when $5 then false else totp_enabled end, totp_secret_enc = case when $5 then null else totp_secret_enc end
+         where id = $1 returning id, username, role, active`,
+        [id, body.active ?? null, body.role ?? null, passwordHash, !!body.resetAccess],
       );
       if (rows[0]) {
-        await this.audit.append(c, { actorId: actor.id, action: 'user.update', entity: 'user', entityId: id, payload: body });
+        // كلمة المرور لا تدخل سجل التدقيق؛ يُسجَّل أنها بُدّلت.
+        await this.audit.append(c, { actorId: actor.id, action: 'user.update', entity: 'user', entityId: id, payload: { active: body.active, role: body.role, passwordReset: !!body.password, accessReset: !!body.resetAccess } });
       }
       return rows[0] ?? null;
     });
