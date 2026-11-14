@@ -123,6 +123,14 @@ const ACTIONS: Record<string, string> = {
 
 const PAGE = 50;
 
+/** «فُحصت عملية واحدة»، «عمليتان»، «9 عمليات»، «11 عملية»: المعدود يتبع العدد كما في العربية. */
+function checked(n: number) {
+  if (n === 1) return 'فُحصت عملية واحدة ولم يُعبث بها.';
+  if (n === 2) return 'فُحصت عمليتان ولم يُعبث بشيء منهما.';
+  const r = n % 100;
+  return `فُحصت ${formatNumber(n)} ${r >= 3 && r <= 10 ? 'عمليات' : 'عملية'} ولم يُعبث بشيء منها.`;
+}
+
 export function Audit() {
   const log = useInfiniteQuery({
     queryKey: ['audit'],
@@ -143,7 +151,7 @@ export function Audit() {
         action={<Button variant="secondary" disabled={verify.isPending} onClick={() => verify.mutate()}>{verify.isPending ? 'جارٍ التحقق…' : 'تحقق من سلامة السجل'}</Button>}
       />
       {verify.data && (verify.data.ok
-        ? <Alert tone="ok">السجل سليم: فُحصت {formatNumber(verify.data.entries)} عملية ولم يُعبث بشيء منها.</Alert>
+        ? <Alert tone="ok">السجل سليم: {checked(verify.data.entries)}</Alert>
         : <Alert>السجل معبوث به: انكسرت السلسلة عند العملية رقم {verify.data.brokenAtSeq}. أبلغ مدير النظام فوراً.</Alert>)}
       {(log.error || verify.error) && <Alert>{(log.error ?? verify.error)!.message}</Alert>}
 

@@ -59,7 +59,9 @@ export const formatNumber = (n: number) => n.toLocaleString('en-US');
 /** أرقام عربية تُكتب من لوحة الهاتف تصير لاتينية، ويُحذف ما سواها. */
 export const digits = (v: string) => v.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g, '');
 const dayTime = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-export const formatDayTime = (iso: string) => dayTime.format(new Date(iso));
+/** «ص» و«م» تلزمان الساعة: لا تنفصلان عنها إلى أول السطر التالي. */
+const keepPeriod = (s: string) => s.replace(/\s+(?=[صم]$)/, ' ');
+export const formatDayTime = (iso: string) => keepPeriod(dayTime.format(new Date(iso)));
 export const formatAgo = (iso: string | null) => {
   if (!iso) return 'لم يكن';
   const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
@@ -77,4 +79,4 @@ export function TextArea({ label, hint, ...props }: React.TextareaHTMLAttributes
   );
 }
 
-export const formatTime = (iso: string) => new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+export const formatTime = (iso: string) => keepPeriod(new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso)));
