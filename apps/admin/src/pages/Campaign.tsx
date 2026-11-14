@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { PAYOUT_READERS, Payouts } from '../components/Payouts';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Dialog, PageHeader, Skeleton } from '../components/ui';
@@ -12,10 +13,10 @@ import { ReconcileTable, type Reconcile } from './Warehouse';
 
 interface Detail {
   id: string; name: string; status: CampaignStatus; unit: string; program: string; startsOn: string; endsOn: string;
-  createdBy: string; decidedBy: string | null; decisionNote: string | null;
+  createdBy: string; decidedBy: string | null; decisionNote: string | null; fundId: string | null;
   totals: { families: number; quantity: number; delivered: number; deliveredQuantity: number; byProxy: number };
   points: { id: string; name: string; assigned: number; quantity: number; delivered: number; deliveredQuantity: number; lastDelivery: string | null }[];
-  recent: { id: string; familyId: string; familyNo: string; receiver: 'HEAD' | 'PROXY'; receiverName: string; quantity: number; deliveredAt: string; mode: 'ONLINE' | 'OFFLINE'; point: string; by: string; hasProof: boolean }[];
+  recent: { id: string; familyId: string; familyNo: string; receiver: 'HEAD' | 'PROXY'; receiverName: string; quantity: number; deliveredAt: string; mode: 'ONLINE' | 'OFFLINE' | 'TRANSFER'; point: string; by: string; hasProof: boolean }[];
   incidents: { id: string; kind: string; message: string; at: string; point: string | null; by: string; familyNo: string | null; deviceId: string | null }[];
 }
 
@@ -98,6 +99,8 @@ export function Campaign() {
         <Stat label="استلم بالوكالة" value={c.totals.byProxy} note="كلهم وكلاء مسجَّلون" />
       </section>
 
+      {c.fundId && ['ACTIVE', 'CLOSED'].includes(c.status) && user && PAYOUT_READERS.includes(user.role) && <Payouts campaignId={id} active={c.status === 'ACTIVE'} />}
+
       <div className="flex flex-wrap items-start gap-5">
         <Card className="flex min-w-0 flex-[2_1_30rem] flex-col gap-3">
           <h2 className="text-lg font-bold">نقاط التوزيع</h2>
@@ -126,7 +129,7 @@ export function Campaign() {
               <li key={d.id} className="flex items-center gap-3 border-b border-line py-2.5 last:border-0">
                 <div className="min-w-0 flex-1">
                   <Link to={`/families/${d.familyId}`} className="font-semibold text-brand-strong">{d.familyNo}</Link>
-                  <div className="text-sm text-muted">{d.receiver === 'PROXY' ? 'الوكيل' : 'رب الأسرة'}: {d.receiverName} · {d.point}{d.mode === 'OFFLINE' ? ' · دون اتصال' : ''}{d.hasProof ? ' · بصورة' : ''}</div>
+                  <div className="text-sm text-muted">{d.receiver === 'PROXY' ? 'الوكيل' : 'رب الأسرة'}: {d.receiverName}{d.point ? ` · ${d.point}` : ''}{d.mode === 'OFFLINE' ? ' · دون اتصال' : d.mode === 'TRANSFER' ? ' · حوالة أو محفظة' : ''}{d.hasProof ? ' · بصورة' : ''}</div>
                 </div>
                 <span className="flex-none text-sm text-muted">{formatDateTime(d.deliveredAt)}</span>
               </li>

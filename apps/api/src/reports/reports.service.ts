@@ -67,7 +67,7 @@ export class ReportsService {
         rows.map((r) => [
           r.serial, r.family_no, r.full_name, r.point, r.quantity, { PENDING: 'لم يستلم', DELIVERED: 'استلم', CANCELLED: 'ملغى' }[r.status as string],
           r.delivered_at ? when.format(new Date(r.delivered_at)) : '', r.delivered_point, r.receiver === 'PROXY' ? 'وكيل' : r.receiver === 'HEAD' ? 'رب الأسرة' : '',
-          r.receiver_name, r.mode === 'OFFLINE' ? 'دون اتصال' : r.mode === 'ONLINE' ? 'متصل' : '', r.username, r.proof ? 'نعم' : '',
+          r.receiver_name, r.mode === 'OFFLINE' ? 'دون اتصال' : r.mode === 'ONLINE' ? 'متصل' : r.mode === 'TRANSFER' ? 'حوالة أو محفظة' : '', r.username, r.proof ? 'نعم' : '',
         ]),
       ),
     };

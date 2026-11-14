@@ -387,6 +387,10 @@ export class DistributionService {
     const end = new Date(row.ends_on);
     end.setHours(23, 59, 59);
     if (Date.now() > end.getTime()) this.refuse('EXPIRED', row);
+    // من أُدرج في كشف دفع معلّق لا يُصرف له نقداً حتى يُفصل في الكشف: وإلا دُفع له مرتين.
+    const held = await q.query(
+      "select b.no from payout_items i join payout_batches b on b.id = i.batch_id where i.entitlement_id = $1 and i.active and b.status = 'PENDING_APPROVAL'", [row.id]);
+    if (held.rows[0]) throw new ConflictException({ message: `لا تسلّم: هذه العائلة في كشف الدفع رقم ${held.rows[0].no} (حوالة أو محفظة) ولم يُفصل فيه`, code: 'IN_PAYOUT' });
     return row;
   }
 
