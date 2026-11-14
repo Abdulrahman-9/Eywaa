@@ -9,6 +9,7 @@ import { toAsciiDigits } from '../common/arabic';
 import { FieldCrypto } from '../common/crypto';
 import { Config } from '../config';
 import { CONFIG, Db } from '../db/db.module';
+import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProgramsService } from '../programs/programs.service';
 import { laneOf, Manifest } from './offline';
@@ -96,6 +97,7 @@ export class DistributionService {
     @Inject(ProgramsService) private readonly programs: ProgramsService,
     @Inject(AttachmentsService) private readonly attachments: AttachmentsService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
+    @Inject(InventoryService) private readonly inventory: InventoryService,
   ) {
     this.signer = new TokenSigner(config.TOKEN_SIGNING_SEED);
   }
@@ -413,6 +415,7 @@ export class DistributionService {
          where id = $1 and status = 'PENDING'`,
         [row.id, actor.id, input.pointId, input.deviceId, input.receiver.kind, receiverName, input.clientOpId],
       );
+      await this.inventory.issueForDelivery(c, { id: row.id, campaignId: row.campaign_id, programId: row.program_id, pointId: input.pointId, quantity: row.quantity, actorId: actor.id });
       await this.audit.append(c, {
         actorId: actor.id, action: 'delivery.redeem', entity: 'entitlement', entityId: row.id,
         payload: { familyNo: row.family_no, campaignId: row.campaign_id, pointId: input.pointId, deviceId: input.deviceId, receiver: input.receiver.kind, receiverName, quantity: row.quantity },
@@ -477,6 +480,7 @@ export class DistributionService {
             ['WRONG_POINT_OFFLINE', row.id, row.campaign_id, st.pointId, st.deviceId, actor.id, JSON.stringify({ familyNo: row.family_no, assignedPoint: row.assigned_point_name })],
           );
         }
+        await this.inventory.issueForDelivery(c, { id: row.id, campaignId: row.campaign_id, programId: row.program_id, pointId: st.pointId, quantity: row.quantity, actorId: actor.id });
         await this.audit.append(c, {
           actorId: actor.id, action: 'delivery.sync', entity: 'entitlement', entityId: row.id,
           payload: { familyNo: row.family_no, campaignId: row.campaign_id, pointId: st.pointId, deviceId: st.deviceId, receiver: item.receiver, receiverName: item.receiverName, deliveredAt: at.toISOString() },

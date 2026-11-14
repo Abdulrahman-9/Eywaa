@@ -12,6 +12,8 @@ export const programSchema = z.object({
   rules: rulesSchema,
   amount: amountSchema,
   minGapDays: z.number().int().min(0).max(3650).default(0),
+  /** الصنف الذي يُخصم من المخزن عند التسليم (للبرنامج العيني). */
+  itemId: z.string().uuid().nullable().optional(),
   active: z.boolean().default(true),
 });
 export type ProgramInput = z.infer<typeof programSchema>;
@@ -49,7 +51,7 @@ export class ProgramsService {
   private present(r: any) {
     return {
       id: r.id, name: r.name, kind: r.kind, unit: r.unit, rules: r.rules as Rules, amount: r.amount as Amount,
-      minGapDays: r.min_gap_days, active: r.active, createdAt: r.created_at,
+      minGapDays: r.min_gap_days, active: r.active, createdAt: r.created_at, itemId: r.item_id as string | null,
     };
   }
 
@@ -117,8 +119,8 @@ export class ProgramsService {
     try {
       return await this.db.tx(async (c) => {
         const { rows } = await c.query(
-          'insert into programs (name, kind, unit, rules, amount, min_gap_days, active, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8) returning *',
-          [input.name, input.kind, input.unit, JSON.stringify(input.rules), JSON.stringify(input.amount), input.minGapDays, input.active, actor.id],
+          'insert into programs (name, kind, unit, rules, amount, min_gap_days, active, created_by, item_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *',
+          [input.name, input.kind, input.unit, JSON.stringify(input.rules), JSON.stringify(input.amount), input.minGapDays, input.active, actor.id, input.itemId ?? null],
         );
         await this.audit.append(c, { actorId: actor.id, action: 'program.create', entity: 'program', entityId: rows[0].id, payload: input });
         return this.present(rows[0]);
@@ -135,8 +137,8 @@ export class ProgramsService {
         const old = await c.query('select name, kind, unit, rules, amount, min_gap_days, active from programs where id = $1 for update', [id]);
         if (!old.rows[0]) throw new NotFoundException('البرنامج غير موجود');
         const { rows } = await c.query(
-          'update programs set name=$2, kind=$3, unit=$4, rules=$5, amount=$6, min_gap_days=$7, active=$8, updated_at=now() where id=$1 returning *',
-          [id, input.name, input.kind, input.unit, JSON.stringify(input.rules), JSON.stringify(input.amount), input.minGapDays, input.active],
+          'update programs set name=$2, kind=$3, unit=$4, rules=$5, amount=$6, min_gap_days=$7, active=$8, item_id=$9, updated_at=now() where id=$1 returning *',
+          [id, input.name, input.kind, input.unit, JSON.stringify(input.rules), JSON.stringify(input.amount), input.minGapDays, input.active, input.itemId ?? null],
         );
         await this.audit.append(c, { actorId: actor.id, action: 'program.update', entity: 'program', entityId: id, payload: { before: old.rows[0], after: input } });
         return this.present(rows[0]);

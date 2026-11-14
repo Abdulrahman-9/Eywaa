@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { CAMPAIGN_STATUS, type CampaignStatus } from './Campaigns';
+import { ReconcileTable, type Reconcile } from './Warehouse';
 
 interface Detail {
   id: string; name: string; status: CampaignStatus; unit: string; program: string; startsOn: string; endsOn: string;
@@ -39,6 +40,8 @@ export function Campaign() {
     // الحملة الجارية تتحدث أرقامها وحدها.
     refetchInterval: (query) => (query.state.data?.status === 'ACTIVE' ? 10_000 : false),
   });
+  const canStock = !!user && ['ADMIN', 'STOREKEEPER', 'DISTRIBUTION_MANAGER', 'ACCOUNTANT', 'AUDITOR'].includes(user.role);
+  const reconcile = useQuery({ queryKey: ['campaign', id, 'reconcile'], queryFn: () => api<Reconcile>(`/inventory/reconcile/${id}`), enabled: canStock, refetchInterval: 30_000 });
   const act = useMutation({
     mutationFn: (v: { verb: string; note?: string }) => api(`/campaigns/${id}/${v.verb}`, { method: 'POST', body: v.note ? { note: v.note } : {} }),
     onSuccess: (_d, v) => {
@@ -131,6 +134,13 @@ export function Campaign() {
           </ul>
         </Card>
       </div>
+
+      {reconcile.data && reconcile.data.item && (
+        <Card className="flex flex-col gap-3">
+          <h2 className="text-lg font-bold">مطابقة الصادر بالمسلَّم</h2>
+          <ReconcileTable data={reconcile.data} />
+        </Card>
+      )}
 
       {c.incidents.length > 0 && (
         <Card className="flex flex-col gap-3">

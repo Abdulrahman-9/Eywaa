@@ -16,13 +16,13 @@ type Amount =
   | { type: 'BY_SIZE'; tiers: { upTo: number | null; value: number }[] };
 export interface Program {
   id: string; name: string; kind: 'MONEY' | 'IN_KIND' | 'PROJECT' | 'SERVICE'; unit: string; rules: Rules; amount: Amount;
-  minGapDays: number; active: boolean; eligibleFamilies: number; eligibleQuantity: number;
+  minGapDays: number; active: boolean; eligibleFamilies: number; eligibleQuantity: number; itemId: string | null;
 }
 type Draft = Omit<Program, 'id' | 'eligibleFamilies' | 'eligibleQuantity'> & { id?: string };
 
 export const KINDS = { MONEY: 'مال', IN_KIND: 'عيني', PROJECT: 'مشروع', SERVICE: 'خدمة' } as const;
 const AMOUNT_TYPES = { FIXED: 'مقدار ثابت', BY_SIZE: 'بحسب عدد الأفراد', PER_MEMBER: 'لكل فرد', PER_ORPHAN: 'لكل يتيم' } as const;
-const blank = (): Draft => ({ name: '', kind: 'IN_KIND', unit: 'سلة', rules: {}, amount: { type: 'FIXED', value: 1 }, minGapDays: 0, active: true });
+const blank = (): Draft => ({ name: '', kind: 'IN_KIND', unit: 'سلة', rules: {}, amount: { type: 'FIXED', value: 1 }, minGapDays: 0, active: true, itemId: null });
 const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
 
 export function describeAmount(a: Amount, unit: string): string {
@@ -53,6 +53,7 @@ function Editor({ draft, setDraft, onClose }: { draft: Draft; setDraft: (d: Draf
     enabled: amountOk,
     retry: false,
   });
+  const items = useQuery({ queryKey: ['items'], queryFn: () => api<{ id: string; name: string; unit: string }[]>('/inventory/items'), retry: false });
   const save = useMutation({
     mutationFn: () => {
       const { id, ...body } = draft;
@@ -69,6 +70,11 @@ function Editor({ draft, setDraft, onClose }: { draft: Draft; setDraft: (d: Draf
         <div className="col-span-full"><Field label="اسم البرنامج">{(id) => <Input id={id} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />}</Field></div>
         <Field label="نوعه">{(id) => <Select id={id} value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as Draft['kind'] })}>{Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>}</Field>
         <Field label="وحدة المقدار" hint="دينار، سلة، قطعة…">{(id) => <Input id={id} value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} />}</Field>
+        {draft.kind === 'IN_KIND' && items.data && (
+          <Field label="صنفه في المخزن" hint="يُخصم من مخزن النقطة عند كل تسليم">
+            {(id) => <Select id={id} value={draft.itemId ?? ''} onChange={(e) => { const it = items.data.find((x) => x.id === e.target.value); setDraft({ ...draft, itemId: e.target.value || null, unit: it ? it.unit : draft.unit }); }}><option value="">غير مربوط</option>{items.data.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</Select>}
+          </Field>
+        )}
         <Field label="أقل فاصل بين عطاءين (يوماً)">{(id) => <Input id={id} inputMode="numeric" value={String(draft.minGapDays)} onChange={(e) => setDraft({ ...draft, minGapDays: int(e.target.value) })} />}</Field>
       </div>
 
@@ -171,7 +177,7 @@ export function Programs() {
               <div className="flex items-center justify-between gap-3"><strong className="text-lg">{p.name}</strong>{p.active ? <span className="text-sm text-muted">{KINDS[p.kind]}</span> : <Badge>معطَّل</Badge>}</div>
               <span className="text-sm text-[#33423C]">{describeAmount(p.amount, p.unit)}{p.minGapDays ? ` · كل ${p.minGapDays} يوماً على الأقل` : ''}</span>
               {p.active && <span className="text-sm">يستحقه الآن <strong>{formatNumber(p.eligibleFamilies)}</strong> عائلة، وحاجتها {formatNumber(p.eligibleQuantity)} {p.unit}</span>}
-              {isAdmin && <Button variant="secondary" className="self-start" onClick={() => setDraft({ id: p.id, name: p.name, kind: p.kind, unit: p.unit, rules: p.rules, amount: p.amount, minGapDays: p.minGapDays, active: p.active })}>تعديل</Button>}
+              {isAdmin && <Button variant="secondary" className="self-start" onClick={() => setDraft({ id: p.id, name: p.name, kind: p.kind, unit: p.unit, rules: p.rules, amount: p.amount, minGapDays: p.minGapDays, active: p.active, itemId: p.itemId })}>تعديل</Button>}
             </Card>
           ))}
         </div>
