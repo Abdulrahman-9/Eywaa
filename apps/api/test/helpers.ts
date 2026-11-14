@@ -40,7 +40,7 @@ export async function startApp(): Promise<INestApplication> {
   const hash = await hashPassword(PASSWORD);
   for (const [username, role] of [
     ['admin', 'ADMIN'], ['researcher', 'FIELD_RESEARCHER'], ['researcher2', 'FIELD_RESEARCHER'],
-    ['supervisor', 'BENEFICIARY_SUPERVISOR'], ['distributor', 'DISTRIBUTOR'], ['distributor2', 'DISTRIBUTOR'],
+    ['supervisor', 'BENEFICIARY_SUPERVISOR'], ['distributor', 'DISTRIBUTOR'], ['distributor2', 'DISTRIBUTOR'], ['agent', 'DISTRIBUTION_AGENT'], ['agent2', 'DISTRIBUTION_AGENT'],
     ['manager', 'DISTRIBUTION_MANAGER'], ['keeper', 'STOREKEEPER'], ['keeper2', 'STOREKEEPER'], ['accountant', 'ACCOUNTANT'], ['accountant2', 'ACCOUNTANT'], ['projects', 'PROJECT_SUPERVISOR'], ['projects2', 'PROJECT_SUPERVISOR'], ['manager2', 'DISTRIBUTION_MANAGER'], ['auditor', 'AUDITOR'],
   ]) {
     await sql('insert into users (username, full_name, password_hash, role) values ($1,$1,$2,$3)', [username, hash, role]);

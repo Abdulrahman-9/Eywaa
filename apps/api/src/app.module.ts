@@ -18,6 +18,8 @@ import { MonitorService } from './distribution/monitor.service';
 import { DonorsService } from './donors/donors.service';
 import { FamiliesController } from './families/families.controller';
 import { FamiliesService } from './families/families.service';
+import { GrantsController } from './grants/grants.controller';
+import { GrantsService } from './grants/grants.service';
 import { HousingController } from './housing/housing.controller';
 import { HousingService } from './housing/housing.service';
 import { InventoryController } from './inventory/inventory.controller';
@@ -48,10 +50,10 @@ import { UsersController } from './users/users.controller';
   imports: [DbModule],
   controllers: [
     AuthController, UsersController, DevicesController, AuditController, SettingsController, StatsController,
-    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController, PayoutsController, ReassessmentsController, QuickController,
+    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController, NotificationsController, InventoryController, AccountingController, HousingController, ReportsController, PayoutsController, ReassessmentsController, QuickController, GrantsController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, MessageWorker, InventoryService, AccountingService, DistributionService, MonitorService, HousingService, DonorsService, ReportsService, PayoutsService, ReassessmentsService, QuickService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, Channels, NotificationsService, MessageWorker, InventoryService, AccountingService, DistributionService, MonitorService, HousingService, DonorsService, ReportsService, PayoutsService, ReassessmentsService, QuickService, GrantsService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

@@ -11,7 +11,7 @@ import {
 import { MonitorService } from './monitor.service';
 
 const MANAGERS = ['ADMIN', 'DISTRIBUTION_MANAGER'] as const;
-const DESK = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR'] as const;
+const DESK = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR', 'DISTRIBUTION_AGENT'] as const;
 const READERS = ['ADMIN', 'DISTRIBUTION_MANAGER', 'DISTRIBUTOR', 'ACCOUNTANT', 'STOREKEEPER', 'AUDITOR'] as const;
 const noteSchema = z.object({ note: z.string().trim().min(1).optional() });
 const place = z.string().trim().max(200).transform((v) => v || null).nullable().optional();
@@ -32,6 +32,25 @@ export class DistributionController {
   @Roles(...MANAGERS)
   createPoint(@Body(new ZodPipe(z.object({ name: z.string().trim().min(2).max(60) }))) body: { name: string }, @CurrentUser() user: AuthUser) {
     return this.dist.createPoint(body.name, user);
+  }
+
+  @Get('agents')
+  @Roles(...MANAGERS)
+  agents() {
+    return this.dist.agents();
+  }
+
+  @Post('agents/:id/point')
+  @HttpCode(200)
+  @Roles(...MANAGERS)
+  agentPoint(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.dist.agentPoint(id, user);
+  }
+
+  @Get('agent/assignments')
+  @Roles('DISTRIBUTION_AGENT')
+  assignments(@CurrentUser() user: AuthUser) {
+    return this.dist.assignments(user);
   }
 
   @Post('points/:id')
@@ -162,8 +181,8 @@ export class DistributionController {
 
   @Get('campaigns/:id/manifest')
   @Roles(...DESK)
-  manifest(@Param('id', ParseUUIDPipe) id: string, @Query(new ZodPipe(manifestSchema)) q: z.infer<typeof manifestSchema>) {
-    return this.dist.manifest(id, q.pointId, q.lane, q.lanes);
+  manifest(@Param('id', ParseUUIDPipe) id: string, @Query(new ZodPipe(manifestSchema)) q: z.infer<typeof manifestSchema>, @CurrentUser() user: AuthUser) {
+    return this.dist.manifest(id, q.pointId, q.lane, q.lanes, user);
   }
 
   @Post('deliveries/check')
