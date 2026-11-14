@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "demo:seed": "node demo/seed.cjs",
+    "demo:record": "node demo/record.cjs demo/public/demo-data.js",
+    "demo:build": "vite build --config demo/vite.config.ts && node demo/build-page.cjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans-arabic": "^5.3.0",

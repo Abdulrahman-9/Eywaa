@@ -4,3 +4,6 @@ dist
 *.log
 coverage
 storage
+# نسخة العرض: ناتج بنائها، وبياناتها المسجَّلة من نظام محلي (تُولَّد بـdemo:seed ثم demo:record)
+apps/admin/dist-demo/
+apps/admin/demo/public/demo-data.js

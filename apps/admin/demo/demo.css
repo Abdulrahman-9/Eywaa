@@ -1,0 +1,7 @@
+@import '../src/index.css';
+/* أصناف Tailwind تُلتقط من شيفرة اللوحة ومن مكوّنات نسخة العرض. */
+@source '../src';
+@source '.';
+
+/* صفحة النسخة تُعرض داخل إطار: خلفيتها صريحة، فلا يظهر لون الحاضن من ورائها. */
+body { background: var(--color-ground); color: var(--color-ink); }
