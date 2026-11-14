@@ -1,3 +1,4 @@
+import { arFormat } from '../common/time';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Db } from '../db/db.module';
 
@@ -61,7 +62,7 @@ export class ReportsService {
        where e.campaign_id = $1 order by e.serial`,
       [campaignId],
     );
-    const when = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { dateStyle: 'short', timeStyle: 'short' });
+    const when = arFormat({ dateStyle: 'short', timeStyle: 'short' });
     return {
       name: camp.name as string,
       csv: toCsv(

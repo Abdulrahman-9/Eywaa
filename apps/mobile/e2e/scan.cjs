@@ -20,7 +20,7 @@ const { BASE, RUN, PASSWORD, call, setupUsers, approvedFamily } = require('../..
   const fam = await approvedFamily(tokens, { name: `صاحب الرمز المصوَّر ${RUN}`, nid: `1969${RUN}11` });
   const program = await call('/programs', tokens.admin, { name: `سلة ${RUN}`, kind: 'IN_KIND', unit: 'سلة', rules: {}, amount: { type: 'FIXED', value: 1 }, minGapDays: 0 });
   const point = await call('/points', tokens.admin, { name: `نقطة ${RUN}` });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date());
   const camp = await call('/campaigns', tokens.manager, { programId: program.id, name: `حملة المسح ${RUN}`, startsOn: today, endsOn: today, pointIds: [point.id] });
   await call(`/campaigns/${camp.id}/submit`, tokens.manager, {});
   await call(`/campaigns/${camp.id}/approve`, tokens.admin, {});

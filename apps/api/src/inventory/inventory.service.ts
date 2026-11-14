@@ -110,6 +110,12 @@ export class InventoryService {
     return this.db.tx(async (c) => {
       await c.query('select pg_advisory_xact_lock($1)', [STOCK_LOCK]);
       const diffs: { itemId: string; book: number; counted: number; diff: number }[] = [];
+      // جرد على صنف له تسوية معلّقة يُحدث تسوية ثانية للفرق نفسه: يُفصل في الأولى أولاً.
+      const open = await c.query(
+        `select i.name from stock_moves m join items i on i.id = m.item_id
+         where m.kind = 'ADJUST' and m.status = 'PENDING' and coalesce(m.from_wh, m.to_wh) = $1 and m.item_id = any($2) limit 1`,
+        [input.warehouseId, input.counts.map((l) => l.itemId)]);
+      if (open.rows[0]) throw new ConflictException(`للصنف «${open.rows[0].name}» تسوية جرد تنتظر الاعتماد في هذا المخزن: افصل فيها قبل جرد جديد`);
       for (const line of input.counts) {
         const book = await this.balance(c, input.warehouseId, line.itemId);
         const diff = line.counted - book;

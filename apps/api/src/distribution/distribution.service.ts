@@ -8,6 +8,7 @@ import { AttachmentsService } from '../attachments/attachments.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/auth.guard';
 import { normalizeName, toAsciiDigits } from '../common/arabic';
+import { arFormat, dayOf, endOfDay, startOfDay } from '../common/time';
 import { FieldCrypto } from '../common/crypto';
 import { Config } from '../config';
 import { CONFIG, Db } from '../db/db.module';
@@ -111,7 +112,7 @@ const MESSAGES: Record<IncidentKind, string> = {
 };
 
 const ENT_SQL = `
-  select e.*, c.name as campaign_name, c.status as campaign_status, c.ends_on, c.unit, c.program_id,
+  select e.*, c.name as campaign_name, c.status as campaign_status, c.starts_on, c.ends_on, c.unit, c.program_id,
          f.family_no, h.full_name as head_name, ap.name as assigned_point_name, dp.name as delivered_point_name
   from entitlements e join campaigns c on c.id = e.campaign_id join families f on f.id = e.family_id
     left join persons h on h.family_id = f.id and h.relation = 'HEAD'
@@ -787,9 +788,8 @@ export class DistributionService {
   }
 
   private tokenFor(r: any): string {
-    const end = new Date(r.ends_on);
-    end.setHours(23, 59, 59);
-    return this.signer.issue({ e: r.id, c: r.campaign_id, p: r.point_id, f: r.family_no, q: r.quantity, x: Math.floor(end.getTime() / 1000) });
+    // الرمز ينتهي بآخر ثانية من يوم الحملة الأخير بتوقيت المركز، لا بتوقيت الخادم.
+    return this.signer.issue({ e: r.id, c: r.campaign_id, p: r.point_id, f: r.family_no, q: r.quantity, x: Math.floor(endOfDay(r.ends_on).getTime() / 1000) });
   }
 
   /** الرموز للطباعة أو الإرسال. الاطلاع عليها يُسجَّل، فمن ملكها ملك الاستلام. */
@@ -812,8 +812,7 @@ export class DistributionService {
     if (!camp.rows[0]) throw new ConflictException('الحملة ليست جارية');
     const mine = rows.filter((_, i) => laneOf(i, lanes) === lane);
     const proxies = await this.db.query('select family_id, full_name from proxies where active and family_id = any($1)', [mine.map((r) => r.family_id)]);
-    const end = new Date(camp.rows[0].ends_on);
-    end.setHours(23, 59, 59);
+    const end = endOfDay(camp.rows[0].ends_on);
     return {
       campaignId: id, campaignName: camp.rows[0].name, unit: camp.rows[0].unit, pointId, lane, lanes,
       publicKey: this.signer.publicKeyB64, endsAt: Math.floor(end.getTime() / 1000),
@@ -874,9 +873,9 @@ export class DistributionService {
     }
     if (row.campaign_status !== 'ACTIVE') this.refuse('NOT_ACTIVE', row);
     if (row.status === 'CANCELLED') this.refuse('CANCELLED', row);
-    const end = new Date(row.ends_on);
-    end.setHours(23, 59, 59);
-    if (Date.now() > end.getTime()) this.refuse('EXPIRED', row);
+    if (Date.now() > endOfDay(row.ends_on).getTime()) this.refuse('EXPIRED', row);
+    // والحملة المعتمدة قبل موعدها لا يُسلَّم منها حتى يبدأ يومها الأول.
+    if (Date.now() < startOfDay(row.starts_on).getTime()) this.refuse('NOT_ACTIVE', row, { startsOn: dayOf(row.starts_on) });
     // من أُدرج في كشف دفع معلّق لا يُصرف له نقداً حتى يُفصل في الكشف: وإلا دُفع له مرتين.
     const held = await q.query(
       "select b.no from payout_items i join payout_batches b on b.id = i.batch_id where i.entitlement_id = $1 and i.active and b.status = 'PENDING_APPROVAL'", [row.id]);
@@ -950,7 +949,7 @@ export class DistributionService {
   private async confirm(entitlementId: string) {
     const r = (await this.db.query(`${ENT_SQL} where e.id = $1`, [entitlementId])).rows[0];
     if (!r || r.status !== 'DELIVERED') return;
-    const when = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(r.delivered_at));
+    const when = arFormat({ dateStyle: 'medium', timeStyle: 'short' }).format(new Date(r.delivered_at));
     const body = `السلام عليكم {الاسم}. استُلمت مستحقاتكم (${r.quantity} ${r.unit}) من نقطة ${r.delivered_point_name} في ${when}، واستلمها ${r.receiver === 'PROXY' ? 'وكيلكم' : 'رب الأسرة'} ${r.receiver_name}. إن لم تستلموها فراجعوا المركز فوراً. رقم العائلة: {رقم_العائلة}`;
     await this.notifications.system('DELIVERY_CONFIRMATION', 'تأكيد التسليم', body, {}, r.family_id);
   }

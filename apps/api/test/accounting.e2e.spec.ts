@@ -163,14 +163,17 @@ describe('الصرف النقدي في التوزيع والعهدة', () => {
 
   it('إقفال العهدة: العدّ المطابق يرجع كله، والعجز قيد ينتظر اعتماد غيره', async () => {
     expect((await post('/accounting/custody/close', 'distributor2', { fundId, userId: distributorId, counted: 1 })).status).toBe(403);
-    const close = await post('/accounting/custody/close', 'distributor', { fundId, counted: 95_000 });
+    // حامل العهدة لا يقفلها بقوله: يعدّها المحاسب.
+    expect((await post('/accounting/custody/close', 'distributor', { fundId, userId: distributorId, counted: 95_000 })).status).toBe(403);
+    const close = await post('/accounting/custody/close', 'accountant', { fundId, userId: distributorId, counted: 95_000 });
     expect(close.body).toMatchObject({ book: 100_000, counted: 95_000, difference: -5_000 });
     expect(close.body.pendingEntry).toMatch(/^ي-/);
     // ما عُدَّ رجع إلى الصندوق، والعجز باقٍ في ذمة الأمين حتى يُعتمد.
     expect(await fundOf(fundId)).toMatchObject({ cash: 895_000, custody: 5_000 });
     const shortage = (await get('/accounting/entries?status=PENDING', 'accountant')).body.find((e: any) => e.kind === 'SHORTAGE');
     expect(shortage.amount).toBe(5_000);
-    await post(`/accounting/entries/${shortage.id}/approve`, 'accountant');
+    expect((await post(`/accounting/entries/${shortage.id}/approve`, 'accountant')).status).toBe(403);
+    await post(`/accounting/entries/${shortage.id}/approve`, 'admin');
     expect(await fundOf(fundId)).toMatchObject({ cash: 895_000, custody: 0 });
     const tb = await balanced();
     expect(tb.balanced).toBe(true);

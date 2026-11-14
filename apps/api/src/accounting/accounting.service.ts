@@ -12,9 +12,10 @@ export const receiptSchema = z.object({ fundId: z.string().uuid(), amount, party
   .refine((r) => r.party || r.donorId, 'يلزم ذكر من قُبض منه');
 export const paymentSchema = z.object({ fundId: z.string().uuid(), amount, party: text, description: text, category: z.string().trim().min(2).max(60) });
 export const custodySchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid(), amount });
-export const receiveSchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid(), amount, note: z.string().trim().max(200).optional() });
+/** expectedBook: الرصيد الذي رآه المحاسب حين عدّ. إن تغيّر قبل وصول طلبه (أو أُرسل الطلب مرتين) رُدّ، فلا يُقيَّد استلام على رصيد لم يره. */
+export const receiveSchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid(), amount, note: z.string().trim().max(200).optional(), expectedBook: z.number().int().optional() });
 export const statementSchema = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
-export const closeSchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid().optional(), counted: z.number().int().min(0).max(1_000_000_000_000) });
+export const closeSchema = z.object({ fundId: z.string().uuid(), userId: z.string().uuid(), counted: z.number().int().min(0).max(1_000_000_000_000), expectedBook: z.number().int().optional() });
 
 type Kind = 'RECEIPT' | 'PAYMENT' | 'CUSTODY_ISSUE' | 'CUSTODY_RETURN' | 'DISBURSEMENT' | 'SHORTAGE' | 'OVERAGE' | 'REVERSAL';
 /** قفل يجعل القيود واحداً بعد واحد، فلا يُصرف من رصيد لم يثبت. */
@@ -109,10 +110,12 @@ export class AccountingService {
          left join ledger_entries e on e.fund_id = f.id and e.status = 'POSTED' left join ledger_lines l on l.entry_id = e.id
        where f.active group by f.id, p.name order by f.created_at`,
     );
+    // من سطور الدفتر نفسها، كميزان المراجعة: فيدخل العكس والعجز والزيادة، ولا يختلف الرقمان.
     const month = await this.db.query(
-      `select coalesce(sum(amount) filter (where kind = 'RECEIPT'), 0)::bigint as received,
-              coalesce(sum(amount) filter (where kind in ('PAYMENT', 'DISBURSEMENT')), 0)::bigint as spent
-       from ledger_entries where status = 'POSTED' and created_at >= date_trunc('month', now())`,
+      `select coalesce(sum(l.credit - l.debit) filter (where l.account = 'INCOME'), 0)::bigint as received,
+              coalesce(sum(l.debit - l.credit) filter (where l.account like 'EXPENSE:%'), 0)::bigint as spent
+       from ledger_lines l join ledger_entries e on e.id = l.entry_id
+       where e.status = 'POSTED' and coalesce(e.decided_at, e.created_at) >= date_trunc('month', now())`,
     );
     const pending = await this.db.query("select count(*)::int as n from ledger_entries where status = 'PENDING'");
     const out = [];
@@ -159,18 +162,48 @@ export class AccountingService {
       if (!e) throw new NotFoundException('القيد غير موجود');
       if (e.status !== 'PENDING') throw new ConflictException('فُصل في هذا القيد من قبل');
       if (e.created_by === actor.id) throw new ForbiddenException('لا يعتمد الموظف قيداً سجّله بنفسه');
+      // ولا قيداً يمسّ ذمته هو: عجز عهدته أو زيادتها أو عكس ما قُيّد عليها.
+      const lines = (await c.query('select account, credit from ledger_lines where entry_id = $1', [id])).rows;
+      if (e.custody_user === actor.id || lines.some((l) => l.account === custodyAccount(actor.id))) throw new ForbiddenException('لا يعتمد الموظف قيداً في ذمته هو');
       if (!approve && !note) throw new BadRequestException('يلزم ذكر سبب الرفض');
-      if (approve && e.kind === 'PAYMENT') await this.requireCash(c, e.fund_id, Number(e.amount));
+      if (approve && e.kind === 'PAYMENT') await this.requireFreeCash(c, e.fund_id, Number(e.amount));
+      if (approve && e.kind === 'REVERSAL') {
+        // عكس سند قبض يُخرج المال من حيث دخل (نقد الصندوق أو ذمة من تسلّمه). فإن كان قد صُرف أو سُلّم لم يبقَ ما يُعكس.
+        const from = lines.find((l) => Number(l.credit) > 0 && (l.account === 'CASH' || l.account.startsWith('CUSTODY:')));
+        if (from) {
+          const have = await this.balanceOf(c, e.fund_id, from.account);
+          if (have < Number(e.amount)) throw new ConflictException(`لا يُعكس الآن: ${from.account === 'CASH' ? 'نقد الصندوق' : 'ذمة من تسلّم المبلغ'} فيه ${have.toLocaleString('en-US')} والمطلوب ${Number(e.amount).toLocaleString('en-US')}. المبلغ صُرف أو سُلّم بعد قيده.`);
+        }
+      }
       await c.query('update ledger_entries set status = $2, decided_by = $3, decided_at = now(), decision_note = $4 where id = $1', [id, approve ? 'POSTED' : 'REJECTED', actor.id, note ?? null]);
       await this.audit.append(c, { actorId: actor.id, action: approve ? 'ledger.approve' : 'ledger.reject', entity: 'ledger_entry', entityId: id, payload: { no: e.no, kind: e.kind, amount: Number(e.amount), note: note ?? null } });
       return { id, no: e.no, status: approve ? 'POSTED' : 'REJECTED' };
     });
   }
 
-  /** النقد الحرّ في الصندوق: ما فيه ناقصاً ما حُجز لحملات جارية وليس في عهدة أحد. */
+  /** نقد الصندوق الحاضر يكفي: لما هو صرف لالتزام محجوز له (دفعة بناء، كشف حوالات)، أو نقل إلى عهدة لا ينقص مال الصندوق. */
   private async requireCash(c: PoolClient, fundId: string, need: number) {
     const cash = await this.balanceOf(c, fundId, 'CASH');
     if (cash < need) throw new ConflictException(`نقد الصندوق لا يكفي: فيه ${cash.toLocaleString('en-US')} والمطلوب ${need.toLocaleString('en-US')}`);
+  }
+
+  /** النقد الحرّ: الحاضر يكفي، وما يبقى بعد الصرف (نقداً وعُهداً) يغطي ما حُجز لحملات جارية ومنازل تُبنى. لسند الصرف الذي لا التزام محجوزاً له. */
+  private async requireFreeCash(c: PoolClient, fundId: string, need: number) {
+    await this.requireCash(c, fundId, need);
+    const held = Number((await c.query(
+      `select coalesce(sum(l.debit - l.credit), 0)::bigint as b from ledger_lines l join ledger_entries e on e.id = l.entry_id
+       where e.fund_id = $1 and e.status = 'POSTED' and (l.account = 'CASH' or l.account like 'CUSTODY:%')`, [fundId])).rows[0].b);
+    const reserved = await this.reserved(c, fundId);
+    if (held - reserved < need) throw new ConflictException(`لا يُصرف: في الصندوق ${held.toLocaleString('en-US')}، منها ${reserved.toLocaleString('en-US')} محجوزة لحملات جارية أو منازل تُبنى، والمطلوب ${need.toLocaleString('en-US')}`);
+  }
+
+  /** الصندوق المقيَّد ببرنامج لا يُصرف منه إلا في حملات برنامجه: لا بناء ولا غيره. */
+  async requireUnrestricted(c: PoolClient, fundId: string, what: string) {
+    const fund = await this.fund(c, fundId);
+    if (fund.program_id) {
+      const program = (await c.query('select name from programs where id = $1', [fund.program_id])).rows[0];
+      throw new ConflictException(`«${fund.name}» مقيَّد ببرنامج «${program?.name ?? ''}»: لا يُصرف منه ${what}`);
+    }
   }
 
   /** القيد لا يُحذف: يُعكس بقيد مقابل ينتظر الاعتماد. */
@@ -180,6 +213,11 @@ export class AccountingService {
       const e = rows[0];
       if (!e) throw new NotFoundException('القيد غير موجود');
       if (e.status !== 'POSTED' || !['RECEIPT', 'PAYMENT'].includes(e.kind)) throw new ConflictException('لا يُعكس إلا سند قبض أو صرف مثبَّت');
+      // قيد أنشأه مستند آخر لا يُعكس وحده، وإلا بقي المستند يقول «صُرف» والدفتر يقول «لم يُصرف».
+      const owner = (await c.query(
+        `select (select 'دفعة مرحلة بناء' from housing_stages where payment_entry = $1 limit 1) as stage,
+                (select 'كشف دفع بالحوالة' from payout_batches where entry_id = $1 limit 1) as payout`, [id])).rows[0];
+      if (owner.stage || owner.payout) throw new ConflictException(`هذا القيد قيّده ${owner.stage ?? owner.payout}: لا يُعكس من هنا`);
       const lines = await c.query('select account, debit from ledger_lines where entry_id = $1', [id]);
       const debit = lines.rows.find((l) => Number(l.debit) > 0)!.account;
       const credit = lines.rows.find((l) => Number(l.debit) === 0)!.account;
@@ -200,6 +238,7 @@ export class AccountingService {
   issueCustody(input: z.infer<typeof custodySchema>, actor: AuthUser) {
     return this.locked(async (c) => {
       await this.fund(c, input.fundId);
+      if (input.userId === actor.id) throw new ForbiddenException('لا يسلّم المحاسب عهدة لنفسه');
       const user = await c.query('select username from users where id = $1 and active', [input.userId]);
       if (!user.rows[0]) throw new BadRequestException('الموظف غير موجود أو معطَّل');
       await this.requireCash(c, input.fundId, input.amount);
@@ -214,11 +253,16 @@ export class AccountingService {
    * والفرق يصير قيد عجز أو زيادة ينتظر اعتماد موظف آخر.
    */
   closeCustody(input: z.infer<typeof closeSchema>, actor: AuthUser) {
-    const userId = input.userId ?? actor.id;
-    if (userId !== actor.id && !['ADMIN', 'ACCOUNTANT'].includes(actor.role)) throw new ForbiddenException('لا يُقفل عهدة غيره إلا المحاسب');
+    const userId = input.userId;
+    // من يحمل العهدة لا يشهد بما ردّ منها: يعدّها ويقفلها محاسب غيره.
+    if (userId === actor.id) throw new ForbiddenException('لا يُقفل الموظف عهدة نفسه');
     return this.locked(async (c) => {
       await this.fund(c, input.fundId);
       const book = await this.balanceOf(c, input.fundId, custodyAccount(userId));
+      if (input.expectedBook !== undefined && input.expectedBook !== book) throw new ConflictException(`تغيّر رصيد العهدة: هو الآن ${book.toLocaleString('en-US')}. أعد العدّ عليه.`);
+      const open = await c.query("select no from ledger_entries where fund_id = $1 and custody_user = $2 and kind in ('SHORTAGE', 'OVERAGE') and status = 'PENDING' limit 1", [input.fundId, userId]);
+      if (open.rows[0]) throw new ConflictException(`لهذه العهدة فرق ينتظر الاعتماد (${open.rows[0].no}): افصل فيه قبل عدّ جديد`);
+      if (book === 0 && input.counted === 0) throw new ConflictException('لا رصيد في هذه العهدة ولا نقد: لا شيء يُقفل');
       const diff = input.counted - book;
       if (input.counted > 0) {
         await this.insert(c, { kind: 'CUSTODY_RETURN', status: 'POSTED', fundId: input.fundId, amount: input.counted, description: 'إرجاع العهدة عند الإقفال', custodyUser: userId, debit: 'CASH', credit: custodyAccount(userId), actorId: actor.id });
@@ -258,6 +302,7 @@ export class AccountingService {
       const holder = (await c.query('select full_name from users where id = $1', [input.userId])).rows[0];
       if (!holder) throw new BadRequestException('الموظف غير موجود');
       const book = await this.balanceOf(c, input.fundId, custodyAccount(input.userId));
+      if (input.expectedBook !== undefined && input.expectedBook !== book) throw new ConflictException(`تغيّر ما في ذمته: هو الآن ${book.toLocaleString('en-US')}. راجع قبل أن تسجّل.`);
       if (input.amount > book) throw new ConflictException(`في ذمته ${book.toLocaleString('en-US')} والمستلَم ${input.amount.toLocaleString('en-US')}. إن زاد النقد عن الدفتر فأقفل الذمة بالعدّ.`);
       const e = await this.insert(c, { kind: 'CUSTODY_RETURN', status: 'POSTED', fundId: input.fundId, amount: input.amount, description: `استلام من ذمة ${holder.full_name}${input.note ? `: ${input.note}` : ''}`, custodyUser: input.userId, debit: 'CASH', credit: custodyAccount(input.userId), actorId: actor.id });
       await this.audit.append(c, { actorId: actor.id, action: 'custody.receive', entity: 'ledger_entry', entityId: e.id, payload: { ...input, no: e.no, book, remaining: book - input.amount } });
@@ -293,13 +338,13 @@ export class AccountingService {
     if (!fund) throw new NotFoundException('الصندوق غير موجود');
     const opening = from ? Number((await this.db.query(
       `select coalesce(sum(l.debit - l.credit), 0)::bigint as b from ledger_lines l join ledger_entries e on e.id = l.entry_id
-       where e.fund_id = $1 and e.status = 'POSTED' and l.account = 'CASH' and e.created_at < $2::date`, [fundId, from])).rows[0].b) : 0;
+       where e.fund_id = $1 and e.status = 'POSTED' and l.account = 'CASH' and coalesce(e.decided_at, e.created_at) < $2::date`, [fundId, from])).rows[0].b) : 0;
     const { rows } = await this.db.query(
-      `select e.id, e.no, e.kind, e.description, e.party, e.category, e.created_at, l.debit, l.credit, u.username as by, du.username as approved_by
+      `select e.id, e.no, e.kind, e.description, e.party, e.category, coalesce(e.decided_at, e.created_at) as created_at, l.debit, l.credit, u.username as by, du.username as approved_by
        from ledger_lines l join ledger_entries e on e.id = l.entry_id join users u on u.id = e.created_by left join users du on du.id = e.decided_by
        where e.fund_id = $1 and e.status = 'POSTED' and l.account = 'CASH'
-         and ($2::date is null or e.created_at >= $2::date) and ($3::date is null or e.created_at < $3::date + 1)
-       order by e.created_at, e.no`, [fundId, from ?? null, to ?? null]);
+         and ($2::date is null or coalesce(e.decided_at, e.created_at) >= $2::date) and ($3::date is null or coalesce(e.decided_at, e.created_at) < $3::date + 1)
+       order by coalesce(e.decided_at, e.created_at), e.no`, [fundId, from ?? null, to ?? null]);
     let balance = opening, received = 0, paid = 0;
     const lines = rows.map((r) => {
       const i = Number(r.debit), o = Number(r.credit);
@@ -307,22 +352,23 @@ export class AccountingService {
       return { id: r.id, no: r.no, kind: r.kind, description: r.description, party: r.party, category: r.category, at: r.created_at, in: i, out: o, balance, by: r.by, approvedBy: r.approved_by };
     });
     // من أين جاء المال وفيمَ ذهب، في المدة نفسها. الإيراد يُحسب يوم قُيّد ولو كان بعدُ في ذمة محصِّله.
-    const LIVE = "e.status = 'POSTED' and not exists (select 1 from ledger_entries r where r.reverses = e.id and r.status = 'POSTED')";
+    // تُجمع من سطور الدفتر، فتوافق ميزان المراجعة: قيد العكس ينقص بابه في مدة العكس، ولا يُمحى أصله من مدة مضت.
     const cats = await this.db.query(
-      `select e.kind, coalesce(e.category, case when e.donor_id is not null then 'DONOR' else 'DIRECT' end) as category, sum(e.amount)::bigint as amount, count(*)::int as n
-       from ledger_entries e where e.fund_id = $1 and e.kind in ('RECEIPT', 'PAYMENT', 'DISBURSEMENT') and ${LIVE}
-         and ($2::date is null or e.created_at >= $2::date) and ($3::date is null or e.created_at < $3::date + 1)
+      `select (l.account = 'INCOME') as income,
+              case when l.account <> 'INCOME' then substr(l.account, 9)
+                   when e.kind = 'OVERAGE' then 'OVERAGE'
+                   else coalesce(e.category, o.category, case when coalesce(e.donor_id, o.donor_id) is not null then 'DONOR' else 'DIRECT' end) end as category,
+              sum(case when l.account = 'INCOME' then l.credit - l.debit else l.debit - l.credit end)::bigint as amount,
+              count(*) filter (where e.kind <> 'REVERSAL')::int as n
+       from ledger_lines l join ledger_entries e on e.id = l.entry_id left join ledger_entries o on o.id = e.reverses
+       where e.fund_id = $1 and e.status = 'POSTED' and (l.account = 'INCOME' or l.account like 'EXPENSE:%')
+         and ($2::date is null or coalesce(e.decided_at, e.created_at) >= $2::date) and ($3::date is null or coalesce(e.decided_at, e.created_at) < $3::date + 1)
        group by 1, 2 order by 3 desc`, [fundId, from ?? null, to ?? null]);
     const custody = Number((await this.db.query(
       `select coalesce(sum(l.debit - l.credit), 0)::bigint as b from ledger_lines l join ledger_entries e on e.id = l.entry_id
        where e.fund_id = $1 and e.status = 'POSTED' and l.account like 'CUSTODY:%'`, [fundId])).rows[0].b);
-    const group = (income: boolean) => cats.rows.filter((r) => (r.kind === 'RECEIPT') === income)
-      .reduce((m: { category: string; amount: number; count: number }[], r) => {
-        const cat = r.kind === 'DISBURSEMENT' ? 'DISBURSEMENT' : r.category;
-        const hit = m.find((x) => x.category === cat);
-        if (hit) { hit.amount += Number(r.amount); hit.count += r.n; } else m.push({ category: cat, amount: Number(r.amount), count: r.n });
-        return m;
-      }, []);
+    const group = (income: boolean) => cats.rows.filter((r) => r.income === income && Number(r.amount) !== 0)
+      .map((r) => ({ category: r.category as string, amount: Number(r.amount), count: r.n as number }));
     return { fundId, fund: fund.name as string, from: from ?? null, to: to ?? null, opening, received, paid, closing: balance, custody, income: group(true), spending: group(false), lines };
   }
 

@@ -100,9 +100,10 @@ export class AccountingController {
     return this.accounting.issueCustody(body, user);
   }
 
+  /** الإقفال شهادة المحاسب بما عدّ: لا يقفل العهدةَ حاملُها. */
   @Post('custody/close')
   @HttpCode(200)
-  @Roles('ADMIN', 'ACCOUNTANT', 'DISTRIBUTOR', 'DISTRIBUTION_MANAGER')
+  @Roles(...BOOKS)
   close(@Body(new ZodPipe(closeSchema)) body: z.infer<typeof closeSchema>, @CurrentUser() user: AuthUser) {
     return this.accounting.closeCustody(body, user);
   }

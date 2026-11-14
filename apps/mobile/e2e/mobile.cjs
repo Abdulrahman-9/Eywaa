@@ -67,7 +67,7 @@ async function deliver(page, { token, familyNo, code }, receiver) {
   const program = await call('/programs', tokens.admin, { name: 'السلة الغذائية', kind: 'IN_KIND', unit: 'سلة', rules: {}, amount: { type: 'FIXED', value: 1 }, minGapDays: 25 });
   const p1 = await call('/points', tokens.admin, { name: 'الجولان' });
   const p2 = await call('/points', tokens.admin, { name: 'الشهداء' });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date());
   const camp = await call('/campaigns', tokens.manager, { programId: program.id, name: 'سلة الميدان', startsOn: today, endsOn: today, pointIds: [p1.id, p2.id] });
   assert.ok(camp.id, JSON.stringify(camp));
   await call(`/campaigns/${camp.id}/submit`, tokens.manager, {});

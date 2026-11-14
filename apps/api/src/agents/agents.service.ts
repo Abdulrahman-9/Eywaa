@@ -197,9 +197,10 @@ export class AgentsService {
   async collections(filter: { boxId?: string; agentId?: string; limit?: number }) {
     const { rows } = await this.db.query(
       `select c.id, c.box_id, b.code, b.location, c.amount, c.collected_at, c.seal_no, c.note, c.direct, c.expected, cu.full_name as collector, ru.username as recorder,
-              e.id as entry_id, e.no as entry_no, f.name as fund
+              e.id as entry_id, e.no as entry_no, coalesce(ef.name, f.name) as fund
        from box_collections c join donation_boxes b on b.id = c.box_id join funds f on f.id = b.fund_id
          join users cu on cu.id = c.collected_by join users ru on ru.id = c.recorded_by left join ledger_entries e on e.id = c.entry_id
+         left join funds ef on ef.id = e.fund_id
        where ($1::uuid is null or c.box_id = $1) and ($2::uuid is null or c.collected_by = $2) order by c.collected_at desc limit $3`,
       [filter.boxId ?? null, filter.agentId ?? null, filter.limit ?? 200]);
     return rows.map((r) => ({

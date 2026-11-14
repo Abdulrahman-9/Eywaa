@@ -66,6 +66,7 @@ export class HousingService {
         const fam = await c.query('select status from families where id = $1', [input.familyId]);
         if (!fam.rows[0]) throw new NotFoundException('العائلة غير موجودة');
         if (fam.rows[0].status !== 'APPROVED') throw new ConflictException('لا يُبنى منزل إلا لعائلة معتمدة');
+        await this.accounting.requireUnrestricted(c, input.fundId, 'لبناء المنازل');
         const { rows } = await c.query(
           `insert into housing_projects (family_id, contractor_id, fund_id, location, budget, contract_date, duration_days, created_by)
            values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
@@ -94,7 +95,10 @@ export class HousingService {
       if (p.status !== 'PENDING_APPROVAL') throw new ConflictException('فُصل في هذا المشروع من قبل');
       if (p.created_by === actor.id) throw new ForbiddenException('لا يعتمد الموظف مشروعاً أنشأه بنفسه');
       if (!approve && !note) throw new BadRequestException('يلزم ذكر سبب الرفض');
-      if (approve) await this.accounting.requireAvailable(c, p.fund_id, Number(p.budget), 'ميزانية المشروع');
+      if (approve) {
+        await this.accounting.requireUnrestricted(c, p.fund_id, 'لبناء المنازل');
+        await this.accounting.requireAvailable(c, p.fund_id, Number(p.budget), 'ميزانية المشروع');
+      }
       await c.query('update housing_projects set status = $2, decided_by = $3, decided_at = now(), decision_note = $4 where id = $1', [id, approve ? 'ACTIVE' : 'REJECTED', actor.id, note ?? null]);
       await this.audit.append(c, { actorId: actor.id, action: approve ? 'housing.approve' : 'housing.reject', entity: 'housing_project', entityId: id, payload: { note: note ?? null, budget: Number(p.budget) } });
     });

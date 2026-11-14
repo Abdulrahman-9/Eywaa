@@ -1,3 +1,4 @@
+import { arFormat } from '../common/time';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import { AuditService } from '../audit/audit.service';
@@ -33,7 +34,7 @@ interface Recipient {
 
 /** مهلة إعادة المحاولة بعد العطل العابر، بالدقائق: دقيقة، ثم خمس، ثم ثلاثون. بعدها تُعدّ الرسالة مخفقة. */
 const RETRY_AFTER_MIN = [1, 5, 30];
-const dateAr = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' });
+const dateAr = arFormat({ weekday: 'long', day: 'numeric', month: 'long' });
 
 @Injectable()
 export class NotificationsService {

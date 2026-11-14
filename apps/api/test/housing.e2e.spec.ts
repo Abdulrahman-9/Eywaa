@@ -82,6 +82,11 @@ describe('مشروع بناء منزل', () => {
     expect(stage.entryNo).toMatch(/^ص-/);
     expect(paid.body.paid).toBe(6_000_000);
     expect(await fund()).toMatchObject({ cash: 24_000_000, reserved: 18_000_000, available: 6_000_000 });
+    // دفعة المرحلة قيّدها المشروع: لا تُعكس من الدفتر وحده، وإلا بقي المشروع يقول «صُرفت» والدفتر يقول «لم تُصرف».
+    const stageEntry = (await sql('select payment_entry from housing_stages where id = $1', [s1.id])).rows[0].payment_entry;
+    const rev = await post(`/accounting/entries/${stageEntry}/reverse`, 'accountant', { reason: 'سُجّلت خطأً' });
+    expect(rev.status).toBe(409);
+    expect(rev.body.message).toContain('دفعة مرحلة بناء');
     expect((await post(`/housing/stages/${s1.id}/approve`, 'accountant2')).status).toBe(409);
     const entry = (await get('/accounting/entries', 'auditor')).body.find((e: any) => e.no === stage.entryNo);
     expect(entry).toMatchObject({ kind: 'PAYMENT', status: 'POSTED', amount: 6_000_000, party: 'جاسم محمد خلف الجميلي' });

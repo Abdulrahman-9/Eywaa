@@ -137,7 +137,7 @@ describe('التقارير', () => {
   });
 
   it('عمليات الموظفين في مدة، من سجل التدقيق', async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date());
     const staff = (await get(`/reports/staff?from=${today}&to=${today}`, 'auditor')).body;
     const d = staff.find((s: any) => s.username === 'distributor');
     expect(d.actions['delivery.redeem']).toBe(3);

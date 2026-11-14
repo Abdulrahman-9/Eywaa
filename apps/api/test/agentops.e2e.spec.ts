@@ -366,7 +366,10 @@ describe('متابعة المتعهدين', () => {
   });
 
   it('ذمة لم يُسلَّم منها منذ أكثر من أسبوع تُعلَّم', async () => {
+    // القيد لا يُبدَّل تاريخه في القاعدة؛ يُعطَّل الحارس هنا وحده لمحاكاة مضيّ الأيام.
+    await sql('alter table ledger_entries disable trigger ledger_entries_guard');
     await sql("update ledger_entries set created_at = now() - interval '12 days' where custody_user = $1", [agent2Id]);
+    await sql('alter table ledger_entries enable trigger ledger_entries_guard');
     const a2 = (await get('/agents/overview', 'manager')).body.agents.find((x: any) => x.username === 'agent2');
     expect(a2.custodyDays).toBe(12);
     expect(a2.alerts.some((t: string) => t.includes('منذ 12 يوماً دون تسليم'))).toBe(true);

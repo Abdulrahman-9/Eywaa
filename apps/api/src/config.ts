@@ -13,6 +13,8 @@ const schema = z.object({
   STORAGE_DIR: z.string().default('./storage'),
   // بذرة مفتاح توقيع رموز الاستلام (Ed25519). من يملكها يصدر رموزاً صحيحة، فتُحفظ كأشد الأسرار.
   TOKEN_SIGNING_SEED: key32,
+  // المنطقة التي تُحسب بها حدود اليوم والشهر (كشوف الحساب، بداية الحملة ونهايتها، «هذا الشهر»). المركز في العراق.
+  APP_TIMEZONE: z.string().regex(/^[A-Za-z_]+\/[A-Za-z_]+$|^UTC$/).default('Asia/Baghdad'),
 });
 
 export type Config = z.infer<typeof schema>;

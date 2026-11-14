@@ -10,7 +10,12 @@ export class Db implements OnModuleDestroy {
   readonly pool: Pool;
 
   constructor(@Inject(CONFIG) config: Config) {
-    this.pool = new Pool({ connectionString: config.DATABASE_URL });
+    // كل اتصال يعمل بتوقيت المركز: current_date و date_trunc و ::date تقطع اليوم والشهر حيث يقطعهما أهل المكان، لا عند الثالثة فجراً.
+    // والمهلات تمنع أن يعلق الخادم كله إن استُنفد الحوض أو علقت معاملة.
+    this.pool = new Pool({
+      connectionString: config.DATABASE_URL, options: `-c timezone=${config.APP_TIMEZONE}`,
+      connectionTimeoutMillis: 10_000, idle_in_transaction_session_timeout: 60_000, statement_timeout: 60_000,
+    });
   }
 
   query<T extends Record<string, any> = any>(text: string, params: unknown[] = []) {

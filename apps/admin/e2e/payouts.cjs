@@ -21,7 +21,7 @@ run(async ({ step, shot, newPage }) => {
   const fund = await call('/accounting/funds', tokens.accountant, { name: 'صندوق المساعدة النقدية', programId: program.id });
   await call('/accounting/receipts', tokens.accountant, { fundId: fund.id, amount: 2000000, party: 'متبرع كريم', description: 'للمساعدة النقدية' });
   const point = await call('/points', tokens.admin, { name: 'المركز' });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date());
   const camp = await call('/campaigns', tokens.manager, { programId: program.id, name: 'مساعدة تشرين الثاني', startsOn: today, endsOn: today, pointIds: [point.id], fundId: fund.id });
   assert.ok(camp.id, JSON.stringify(camp));
   await call(`/campaigns/${camp.id}/submit`, tokens.manager, {});

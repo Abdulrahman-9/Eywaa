@@ -27,7 +27,7 @@ const shot = async (page, name) => SHOTS && page.screenshot({ path: `${SHOTS}/${
   const center = await call('/points', tokens.admin, { name: 'المركز' });
   const agentUser = (await call('/agents', tokens.manager)).find((a) => a.username === names.agent);
   const agentPoint = await call(`/agents/${agentUser.id}/point`, tokens.manager, {});
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baghdad' }).format(new Date());
   const camp = await call('/campaigns', tokens.manager, { programId: program.id, name: 'لحوم الجمعة', startsOn: today, endsOn: today, pointIds: [center.id, agentPoint.id] });
   assert.ok(camp.id, JSON.stringify(camp));
   await call(`/campaigns/${camp.id}/submit`, tokens.manager, {});
