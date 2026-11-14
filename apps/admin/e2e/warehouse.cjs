@@ -75,7 +75,17 @@ run(async ({ step, shot, newPage }) => {
     const main = stock.warehouses.find((w) => w.main).id, wh = stock.warehouses.find((w) => !w.main).id;
     // أُرسل للحملة سلتان، وتُسلَّم ثلاث: الثالثة بلا بضاعة مرسلة.
     await call('/inventory/moves', tokens.keeper, { kind: 'RETURN', itemId: items[0].id, fromWarehouseId: wh, toWarehouseId: main, quantity: 2 });
-    await call('/inventory/moves', tokens.keeper, { kind: 'TRANSFER', itemId: items[0].id, fromWarehouseId: main, toWarehouseId: wh, quantity: 2, campaignId: camp.id });
+    // التحويل من الواجهة: الحملة الجارية على الصنف تُختار سلفاً في حقل «للحملة»، وبه يدخل التحويل مطابقتها.
+    await keeper.reload();
+    await keeper.getByRole('button', { name: 'تحويل إلى نقطة' }).click();
+    const td = keeper.getByRole('dialog');
+    await td.getByLabel('الصنف').selectOption({ index: 1 });
+    await td.getByLabel('إلى مخزن النقطة').selectOption({ label: 'مخزن الجولان' });
+    await td.getByLabel('للحملة').waitFor();
+    assert.equal(await td.getByLabel('للحملة').inputValue(), camp.id);
+    await td.getByLabel('الكمية').fill('2');
+    await td.getByRole('button', { name: 'سجّل الحركة' }).click();
+    await keeper.getByText('سُجّلت الحركة').first().waitFor();
     const toks = await call(`/campaigns/${camp.id}/tokens`, tokens.manager);
     for (const t of toks) await call('/deliveries/redeem', tokens.distributor, { pointId: point.id, deviceId: 'd1', locate: { token: t.token }, receiver: { kind: 'HEAD' }, clientOpId: crypto.randomUUID() });
 
@@ -86,5 +96,24 @@ run(async ({ step, shot, newPage }) => {
     await shot(manager, '24-reconcile');
     await manager.getByRole('link', { name: 'المخازن' }).click();
     await manager.getByText('-1 ناقصة').waitFor();
+  });
+
+  await step('الجرد: ما خالف الدفتر تسوية لا تغيّر الرصيد حتى يعتمدها غير من جرد، والأرقام العربية تُقرأ', async () => {
+    await keeper.reload();
+    await keeper.getByRole('button', { name: 'جرد', exact: true }).click();
+    const d = keeper.getByRole('dialog');
+    await d.getByRole('row', { name: /سلة غذائية/ }).getByRole('cell', { name: '43', exact: true }).waitFor();
+    await d.getByLabel('العدّ الفعلي: سلة غذائية').fill('٤٠');
+    await d.getByText('نقص 3').waitFor();
+    assert.equal(await d.getByRole('button', { name: 'احفظ الجرد بفروقه' }).isDisabled(), true);
+    await d.getByLabel('بيان الجرد').fill('جرد آخر الشهر');
+    await shot(keeper, '25-stocktake');
+    await d.getByRole('button', { name: 'احفظ الجرد بفروقه' }).click();
+    await keeper.getByText('سُجّل الجرد: 1 فرق ينتظر اعتماد موظف آخر').waitFor();
+    await keeper.getByRole('main').getByRole('row', { name: /سلة غذائية/ }).getByRole('cell', { name: '43', exact: true }).waitFor();
+    await manager.reload();
+    await manager.getByRole('button', { name: 'اعتماد', exact: true }).click();
+    await manager.getByRole('dialog').getByRole('button', { name: 'اعتماد الحركة' }).click();
+    await manager.getByRole('row', { name: /سلة غذائية/ }).getByRole('cell', { name: '40', exact: true }).waitFor();
   });
 });

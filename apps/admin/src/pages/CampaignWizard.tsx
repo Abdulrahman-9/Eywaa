@@ -70,12 +70,24 @@ const toSelection = (d: Draft): Selection => {
   if ((num(d.sinceDays) ?? 0) > 0) s.notSinceDays = { days: num(d.sinceDays)!, scope: d.scope };
   return s;
 };
-const read = (key: string): Draft | null => { try { const raw = sessionStorage.getItem(key); return raw ? { ...blank(), ...JSON.parse(raw) } : null; } catch { return null; } };
+/**
+ * المسودة المحفوظة في المتصفح تحمل بصمة حال الحملة في الخادم يوم بدأ التعديل. فإن تغيّرت الحملة بعدها
+ * (أُضيفت عائلة أو حُذفت من صفحة الحملة) لم تُستعمل: لو استُعملت لأعاد الحفظُ اللقطةَ القديمة ومحا ما عُدّل باليد.
+ */
+const read = (key: string, basis: string): Draft | null => {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const stored = JSON.parse(raw) as { basis?: string; d?: Partial<Draft> };
+    return stored.d && stored.basis === basis ? { ...blank(), ...stored.d } : null;
+  } catch { return null; }
+};
 
 /** تحضير حملة أو تعديل مسودتها: خمس صفحات يُتنقَّل بينها دون أن يضيع ما كُتب. */
 export function CampaignWizard() {
   const { id } = useParams();
-  const detail = useQuery({ queryKey: ['campaign', id, 'edit'], queryFn: () => api<CampaignDetail>(`/campaigns/${id}`), enabled: !!id, staleTime: Infinity });
+  // تُجلب الحملة من الخادم عند كل دخول إلى التعديل (لا من ذاكرة المتصفح)، ولا يُعاد جلبها والمعالج مفتوح.
+  const detail = useQuery({ queryKey: ['campaign', id, 'edit'], queryFn: () => api<CampaignDetail>(`/campaigns/${id}`), enabled: !!id, staleTime: Infinity, gcTime: 0, refetchOnWindowFocus: false, refetchOnReconnect: false });
   if (id && detail.isPending) return <Skeleton className="h-64 w-full" />;
   if (id && detail.error) return <Alert>{detail.error.message}</Alert>;
   if (id && detail.data!.status !== 'DRAFT') {
@@ -92,10 +104,11 @@ function Wizard({ campaign }: { campaign?: CampaignDetail }) {
   const editing = !!campaign;
   const base = editing ? `/campaigns/${campaign.id}/edit` : '/campaigns/new';
   const storageKey = `eywaa.campaign.${campaign?.id ?? 'new'}`;
-  const [d, setD] = useState<Draft>(() => read(storageKey) ?? (campaign ? fromCampaign(campaign) : blank()));
+  const [basis] = useState(() => (campaign ? JSON.stringify(fromCampaign(campaign)) : 'new'));
+  const [d, setD] = useState<Draft>(() => read(storageKey, basis) ?? (campaign ? fromCampaign(campaign) : blank()));
   const set = (patch: Partial<Draft>) => setD((x) => ({ ...x, ...patch }));
   const saved = useRef(false);
-  useEffect(() => { if (!saved.current) { try { sessionStorage.setItem(storageKey, JSON.stringify(d)); } catch { /* يعمل بلا حفظ */ } } }, [d, storageKey]);
+  useEffect(() => { if (!saved.current) { try { sessionStorage.setItem(storageKey, JSON.stringify({ basis, d })); } catch { /* يعمل بلا حفظ */ } } }, [d, storageKey, basis]);
 
   const [newPoint, setNewPoint] = useState('');
   const [addNo, setAddNo] = useState('');

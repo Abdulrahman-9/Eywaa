@@ -27,6 +27,10 @@ services:
       FIELD_ENC_KEY: ${FIELD_ENC_KEY:?}
       FIELD_HMAC_KEY: ${FIELD_HMAC_KEY:?}
       TOKEN_SIGNING_SEED: ${TOKEN_SIGNING_SEED:?}
+      # المدير والمحاسب لا يُفتح لهما شيء حتى يفعّلا التحقق بعاملين. يُنصح بإبقائه 1.
+      REQUIRE_TOTP: ${REQUIRE_TOTP:-1}
+      # أمام الخادم وسيط واحد (Caddy): به يُعرف عنوان الطالب الحق لكبح محاولات الدخول.
+      TRUST_PROXY: 1
       # مزوّد الرسائل. إن تُركت فارغة بقي النظام على المحاكاة: يسجّل ولا يرسل.
       # عنوان النظام العلني. به تُبنى روابط صور الرموز المرفقة برسائل واتساب.
       PUBLIC_BASE_URL: https://${DOMAIN:?}
@@ -37,6 +41,11 @@ services:
       MSG_CALLBACK_SECRET: ${MSG_CALLBACK_SECRET:-}
     volumes:
       - storage:/data/storage
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   caddy:
     image: caddy:2

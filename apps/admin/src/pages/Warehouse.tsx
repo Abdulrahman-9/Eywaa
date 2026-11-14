@@ -107,6 +107,64 @@ function MoveDialog({ kind, stock, onClose }: { kind: Kind | null; stock: Stock;
   );
 }
 
+/**
+ * الجرد: يُعدّ ما في المخزن فعلاً ويُكتب لكل صنف. ما وافق الدفتر لا يُحدث شيئاً، وما خالفه يصير «تسوية جرد»
+ * لا تُخصم ولا تُضاف حتى يعتمدها موظف آخر. والصنف الذي تُرك فارغاً لم يُجرد.
+ */
+function StocktakeDialog({ open, stock, onClose }: { open: boolean; stock: Stock; onClose: () => void }) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [warehouseId, setWarehouseId] = useState('');
+  const [counts, setCounts] = useState<Record<string, string>>({});
+  const [note, setNote] = useState('');
+  const wh = warehouseId || stock.warehouses.find((w) => w.main)?.id || '';
+  const counted = stock.items.filter((i) => digits(counts[i.id] ?? '') !== '');
+  const differing = counted.filter((i) => int(counts[i.id]) !== (i.byWarehouse[wh] ?? 0)).length;
+  const reset = () => { setCounts({}); setNote(''); setWarehouseId(''); };
+  const save = useMutation({
+    mutationFn: () => api<{ counted: number; differences: unknown[] }>('/inventory/stocktake', {
+      method: 'POST', body: { warehouseId: wh, note: note.trim(), counts: counted.map((i) => ({ itemId: i.id, counted: int(counts[i.id]) })) },
+    }),
+    onSuccess: (r) => {
+      toast(r.differences.length ? `سُجّل الجرد: ${r.differences.length} فرق ينتظر اعتماد موظف آخر` : 'سُجّل الجرد: العدّ يطابق الدفتر', r.differences.length ? 'info' : 'ok');
+      queryClient.invalidateQueries({ queryKey: ['stock'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-moves'] });
+      reset();
+      onClose();
+    },
+  });
+  return (
+    <Dialog open={open} wide title="جرد مخزن" onClose={() => { save.reset(); onClose(); }}>
+      {save.error && <Alert>{save.error.message}</Alert>}
+      <Field label="المخزن">{(id) => <Select id={id} value={wh} onChange={(e) => { setWarehouseId(e.target.value); setCounts({}); }}>{stock.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>}</Field>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[28rem] border-collapse">
+          <thead><tr className="text-sm text-muted">{['الصنف', 'في الدفتر', 'العدّ الفعلي', 'الفرق'].map((h) => <th key={h} scope="col" className="border-b border-line p-2 text-start font-medium">{h}</th>)}</tr></thead>
+          <tbody>
+            {stock.items.map((i) => {
+              const book = i.byWarehouse[wh] ?? 0, typed = digits(counts[i.id] ?? '') !== '', diff = int(counts[i.id] ?? '') - book;
+              return (
+                <tr key={i.id} className="border-b border-line last:border-0">
+                  <td className="p-2 font-semibold">{i.name} <span className="text-sm font-normal text-muted">({i.unit})</span></td>
+                  <td className="p-2 tabular-nums">{formatNumber(book)}</td>
+                  <td className="p-2"><Input aria-label={`العدّ الفعلي: ${i.name}`} dir="ltr" inputMode="numeric" className="max-w-32" value={counts[i.id] ?? ''} onChange={(e) => setCounts({ ...counts, [i.id]: e.target.value })} /></td>
+                  <td className="p-2 font-bold tabular-nums">{!typed ? <span className="font-normal text-muted">لم يُجرد</span> : diff === 0 ? <span className="text-brand-strong">يطابق</span> : <span className="text-danger">{diff > 0 ? `زيادة ${formatNumber(diff)}` : `نقص ${formatNumber(-diff)}`}</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <Field label="بيان الجرد" hint="متى ولماذا: جرد آخر الشهر، جرد بعد حملة، استلام وتسليم بين أمينين.">{(id) => <Input id={id} value={note} onChange={(e) => setNote(e.target.value)} />}</Field>
+      {differing > 0 && <Alert tone="warn"><strong>{differing} صنف يخالف الدفتر.</strong> أعد عدّه قبل الحفظ. ما يُحفظ فرقاً لا يغيّر الرصيد حتى يعتمده موظف آخر.</Alert>}
+      <div className="flex flex-wrap justify-end gap-3">
+        <Button variant="secondary" onClick={() => { save.reset(); onClose(); }}>إلغاء</Button>
+        <Button disabled={!counted.length || note.trim().length < 3 || save.isPending} onClick={() => save.mutate()}>{differing ? 'احفظ الجرد بفروقه' : 'احفظ الجرد'}</Button>
+      </div>
+    </Dialog>
+  );
+}
+
 export function Warehouse() {
   const { user } = useAuth();
   const toast = useToast();
@@ -116,6 +174,7 @@ export function Warehouse() {
   const donations = useQuery({ queryKey: ['agent-donations', '?kind=IN_KIND&status=REPORTED'], queryFn: () => api<{ id: string }[]>('/agent-donations?kind=IN_KIND&status=REPORTED') });
   const [kind, setKind] = useState<Kind | null>(null);
   const [adding, setAdding] = useState(false);
+  const [taking, setTaking] = useState(false);
   const [item, setItem] = useState({ name: '', unit: '' });
   const [deciding, setDeciding] = useState<{ move: Move; approve: boolean } | null>(null);
   const canKeep = user?.role === 'ADMIN' || user?.role === 'STOREKEEPER';
@@ -143,6 +202,7 @@ export function Warehouse() {
         action={canKeep && (
           <div className="flex flex-wrap gap-2.5">
             <Button variant="secondary" onClick={() => setAdding(true)}>صنف جديد</Button>
+            <Button variant="secondary" onClick={() => setTaking(true)}>جرد</Button>
             <Button variant="secondary" onClick={() => setKind('WASTE')}>تالف</Button>
             <Button variant="secondary" onClick={() => setKind('RETURN')}>راجع من نقطة</Button>
             <Button variant="secondary" onClick={() => setKind('TRANSFER')}>تحويل إلى نقطة</Button>
@@ -208,6 +268,7 @@ export function Warehouse() {
       </Card>
 
       <MoveDialog kind={kind} stock={s} onClose={() => setKind(null)} />
+      <StocktakeDialog open={taking} stock={s} onClose={() => setTaking(false)} />
       <Dialog open={adding} title="صنف جديد" onClose={() => { addItem.reset(); setAdding(false); }}>
         {addItem.error && <Alert>{addItem.error.message}</Alert>}
         <Field label="اسم الصنف">{(id) => <Input id={id} value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} />}</Field>

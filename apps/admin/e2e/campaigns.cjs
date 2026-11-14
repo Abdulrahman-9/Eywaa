@@ -194,7 +194,8 @@ run(async ({ step, shot, newPage }) => {
     assert.equal(await mgr.getByRole('button', { name: 'احذف' }).count(), 0);
     assert.equal(await mgr.getByRole('main').getByLabel('أضف عائلة برقمها').count(), 0);
     const msgs = await call(`/families/${fams[2].id}/messages`, tokens.supervisor);
-    assert.ok(msgs.some((m) => m.kind === 'CAMPAIGN_INVITE' && /أحضروا هذا الرمز: \d{8}/.test(m.text)));
+    // الدعوة خرجت برمزها الرقمي؛ وسجل الرسائل في ملف العائلة يحجبه، فلا يقرؤه من لا يسلّم.
+    assert.ok(msgs.some((m) => m.kind === 'CAMPAIGN_INVITE' && /أحضروا هذا الرمز: •{8}\./.test(m.text)));
     const toks = await call(`/campaigns/${id}/tokens`, tokens.manager);
     const point = (await call(`/campaigns/${id}`, tokens.manager)).points[0].id;
     const t = toks.find((x) => x.familyNo === fams[2].familyNo);

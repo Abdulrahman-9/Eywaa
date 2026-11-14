@@ -1,12 +1,30 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { Component, Suspense, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { NAV, ROLE_LABEL, canSee } from '../lib/roles';
 import { AccountDialog } from './Account';
-import { Button, Icon } from './ui';
+import { Alert, Button, Icon, Skeleton } from './ui';
+
+/**
+ * خطأ في صفحة لا يُسقط اللوحة كلها بياضاً: تبقى القائمة، ويُقال للموظف ما يفعل.
+ * وأكثر ما يقع بعد تحديث النظام والتبويب مفتوح: ملف الصفحة القديم لم يعد في الخادم، وإعادة التحميل تجلب الجديد.
+ */
+class PageBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <Alert tone="warn">
+        <strong>تعذّر عرض هذه الصفحة.</strong> قد يكون النظام حُدّث وهذا التبويب مفتوح. ما حفظتَه محفوظ.{' '}
+        <button type="button" className="font-bold underline" onClick={() => window.location.reload()}>أعد تحميل الصفحة</button>
+      </Alert>
+    );
+  }
+}
 
 export function Shell() {
   const { user, logout } = useAuth();
@@ -73,7 +91,7 @@ export function Shell() {
           <Button variant="secondary" onClick={logout}>تسجيل الخروج</Button>
         </header>
         <main key={pageKey} className="page-in flex flex-col gap-6 px-4 py-6 md:px-8">
-          <Outlet />
+          <PageBoundary key={pageKey}><Suspense fallback={<Skeleton className="h-64 w-full" />}><Outlet /></Suspense></PageBoundary>
         </main>
         <AccountDialog open={account} onClose={() => setAccount(false)} />
       </div>

@@ -1,37 +1,45 @@
+import { lazy, type ComponentType } from 'react';
 import { Link, Navigate, Route, Routes } from 'react-router-dom';
 import { PasswordForm, Totp } from './components/Account';
 import { Shell } from './components/Shell';
 import { Card, Skeleton } from './components/ui';
 import { useAuth } from './lib/auth';
 import { NAV, canSee } from './lib/roles';
-import { Agent } from './pages/Agent';
-import { Agents } from './pages/Agents';
-import { Audit } from './pages/Audit';
-import { Boxes } from './pages/Boxes';
-import { FundStatement } from './pages/FundStatement';
-import { Campaign } from './pages/Campaign';
-import { CampaignWizard } from './pages/CampaignWizard';
-import { Campaigns } from './pages/Campaigns';
-import { Cashbox } from './pages/Cashbox';
-import { Desk } from './pages/Desk';
-import { Families } from './pages/Families';
-import { Family } from './pages/Family';
-import { Import } from './pages/Import';
-import { Inspections } from './pages/Inspections';
-import { Notify } from './pages/Notify';
-import { Programs } from './pages/Programs';
-import { Register } from './pages/Register';
-import { Reports } from './pages/Reports';
-import { Requests } from './pages/Requests';
-import { Review } from './pages/Review';
-import { Scoring } from './pages/Scoring';
-import { Housing, HousingProject } from './pages/Housing';
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
-import { Settings } from './pages/Settings';
-import { Tokens } from './pages/Tokens';
-import { Users } from './pages/Users';
-import { Warehouse } from './pages/Warehouse';
+
+/**
+ * كل صفحة تُحمَّل عند أول دخول إليها، لا مع فتح النظام: موظف الشبّاك لا يحمّل معه المحاسبة والاستيراد والتقارير.
+ * (كانت اللوحة كلها ملفاً واحداً يقارب الميغابايت.)
+ */
+const page = <K extends string>(load: () => Promise<{ [P in K]: ComponentType }>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })));
+const Agent = page(() => import('./pages/Agent'), 'Agent');
+const Agents = page(() => import('./pages/Agents'), 'Agents');
+const Audit = page(() => import('./pages/Audit'), 'Audit');
+const Boxes = page(() => import('./pages/Boxes'), 'Boxes');
+const FundStatement = page(() => import('./pages/FundStatement'), 'FundStatement');
+const Campaign = page(() => import('./pages/Campaign'), 'Campaign');
+const CampaignWizard = page(() => import('./pages/CampaignWizard'), 'CampaignWizard');
+const Campaigns = page(() => import('./pages/Campaigns'), 'Campaigns');
+const Cashbox = page(() => import('./pages/Cashbox'), 'Cashbox');
+const Desk = page(() => import('./pages/Desk'), 'Desk');
+const Families = page(() => import('./pages/Families'), 'Families');
+const Family = page(() => import('./pages/Family'), 'Family');
+const Import = page(() => import('./pages/Import'), 'Import');
+const Inspections = page(() => import('./pages/Inspections'), 'Inspections');
+const Notify = page(() => import('./pages/Notify'), 'Notify');
+const Programs = page(() => import('./pages/Programs'), 'Programs');
+const Register = page(() => import('./pages/Register'), 'Register');
+const Reports = page(() => import('./pages/Reports'), 'Reports');
+const Requests = page(() => import('./pages/Requests'), 'Requests');
+const Review = page(() => import('./pages/Review'), 'Review');
+const Scoring = page(() => import('./pages/Scoring'), 'Scoring');
+const Housing = page(() => import('./pages/Housing'), 'Housing');
+const HousingProject = page(() => import('./pages/Housing'), 'HousingProject');
+const Settings = page(() => import('./pages/Settings'), 'Settings');
+const Tokens = page(() => import('./pages/Tokens'), 'Tokens');
+const Users = page(() => import('./pages/Users'), 'Users');
+const Warehouse = page(() => import('./pages/Warehouse'), 'Warehouse');
 
 function Message({ title, body }: { title: string; body: string }) {
   return (
@@ -43,7 +51,7 @@ function Message({ title, body }: { title: string; body: string }) {
   );
 }
 
-const PAGES: Record<string, () => React.JSX.Element> = {
+const PAGES: Record<string, ComponentType> = {
   '/': Home, '/families': Families, '/requests': Requests, '/inspections': Inspections, '/review': Review, '/scoring': Scoring, '/programs': Programs, '/campaigns': Campaigns, '/desk': Desk, '/agents': Agents, '/boxes': Boxes, '/notify': Notify, '/warehouse': Warehouse, '/cashbox': Cashbox, '/housing': Housing, '/reports': Reports, '/users': Users, '/audit': Audit, '/settings': Settings,
 };
 const REGISTRARS = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
