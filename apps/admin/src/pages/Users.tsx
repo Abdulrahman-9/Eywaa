@@ -54,7 +54,7 @@ function CreateUserDialog({ open, onClose }: { open: boolean; onClose: () => voi
         <Field label="اسم المستخدم" error={errors.username} hint="حروف لاتينية صغيرة وأرقام، مثل: ahmed.ali">
           {(id) => <Input id={id} dir="ltr" autoComplete="off" value={form.username} onChange={set('username')} required />}
         </Field>
-        <Field label="كلمة المرور" error={errors.password} hint="12 خانة على الأقل">
+        <Field label="كلمة المرور" error={errors.password} hint="12 خانة على الأقل. مؤقتة: يغيّرها صاحبها عند أول دخول.">
           {(id) => <Input id={id} dir="ltr" type="password" autoComplete="new-password" value={form.password} onChange={set('password')} required />}
         </Field>
         <Field label="الدور" error={errors.role}>

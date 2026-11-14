@@ -36,10 +36,10 @@ const PAYLOADS = {
     incomes: z.array(
       z.object({
         kind: z.enum(['SALARY', 'PENSION', 'SOCIAL_WELFARE', 'WORK', 'OTHER_AID']),
-        amountIqd: z.number().int().min(0),
+        amountIqd: z.number().int().min(0).max(1_000_000_000),
         note: optionalText,
       }),
-    ),
+    ).max(20),
   }),
   SET_PROXIES: z.object({
     proxies: z.array(z.object({ fullName: text, phone: phone.optional(), relation: optionalText })),

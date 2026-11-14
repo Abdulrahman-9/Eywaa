@@ -11,6 +11,8 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
   app.getHttpAdapter().getInstance().disable('x-powered-by');
+  // خلف Caddy: عنوان الطالب الحق في ترويسة الوسيط. بغير هذا يبدو الناس كلهم عنواناً واحداً فيُكبحون معاً.
+  if (config.TRUST_PROXY) app.getHttpAdapter().getInstance().set('trust proxy', config.TRUST_PROXY);
   // ترويسات تحمي المتصفح: لا تُعرض الصفحات داخل إطار، ولا يُخمَّن نوع المحتوى، ولا يُحفظ ما فيه بيانات.
   app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');

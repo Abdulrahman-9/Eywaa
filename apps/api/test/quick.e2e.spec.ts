@@ -43,6 +43,10 @@ describe('طلب التسجيل السريع', () => {
     const similar = await post('/quick-requests', 'researcher', { headName: 'سلمي حاتم مزهر الدليمى', mahalla: 'الجولان', membersCount: 5 });
     expect(similar.body.matches.families[0]).toMatchObject({ familyNo: registered.familyNo, samePhone: false });
     expect(similar.body.matches.families[0].score).toBeGreaterThan(0.9);
+    // موظف التوزيع يرفع الطلب ولا يُعاد إليه من يشبهه في السجل: ليس الطلب وسيلة للسؤال عمّن هو مسجَّل.
+    const fromDesk = await post('/quick-requests', 'distributor', { headName: 'سلمى حاتم مزهر الدليمي', phone: '07705550001' });
+    expect([fromDesk.status, fromDesk.body.matches]).toEqual([201, { families: [], requests: [] }]);
+    await sql('delete from quick_requests where id = $1', [fromDesk.body.id]);
     const phone = await post('/quick-requests', 'researcher', { headName: 'اسم لا يشبه أحداً', phone: '0770 555 0001' });
     expect(phone.body.matches.families[0]).toMatchObject({ familyNo: registered.familyNo, samePhone: true });
     const twice = await post('/quick-requests', 'researcher', { headName: 'جبار كاظم حسون الشمري' });

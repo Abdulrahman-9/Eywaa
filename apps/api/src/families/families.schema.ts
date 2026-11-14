@@ -78,7 +78,7 @@ export const memberSchema = z.object({
   isOrphan: z.boolean().default(false),
   disability: optionalText,
   chronicIllness: optionalText,
-  documents: z.array(documentSchema).default([]),
+  documents: z.array(documentSchema).max(10).default([]),
 });
 
 export const createFamilySchema = z
@@ -102,17 +102,19 @@ export const createFamilySchema = z
     rationCard: z.object({ number: docNumber, issuedAt: date.optional(), center: optionalText }).optional(),
     location: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).optional(),
     notes: optionalText,
-    members: z.array(memberSchema).min(1),
+    // حدود عليا: أسرة من ستين فرداً لا تكون، وطلب بمئة ألف فرد يُراد به إنهاك الخادم.
+    members: z.array(memberSchema).min(1).max(60),
     incomes: z
       .array(
         z.object({
           kind: z.enum(['SALARY', 'PENSION', 'SOCIAL_WELFARE', 'WORK', 'OTHER_AID']),
-          amountIqd: z.number().int().min(0),
+          amountIqd: z.number().int().min(0).max(1_000_000_000),
           note: optionalText,
         }),
       )
+      .max(20)
       .default([]),
-    proxies: z.array(z.object({ fullName: text, phone: phone.optional(), relation: optionalText })).default([]),
+    proxies: z.array(z.object({ fullName: text, phone: phone.optional(), relation: optionalText })).max(10).default([]),
   })
   .superRefine((f, ctx) => {
     const heads = f.members.filter((m) => m.relation === 'HEAD');

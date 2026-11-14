@@ -1,7 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
-import { api } from '../lib/api';
+import { api, tokenStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useToast } from './toast';
 import { Alert, Badge, Button, Dialog, Field, Input } from './ui';
@@ -12,8 +12,9 @@ export function PasswordForm({ onDone, forced }: { onDone: () => void; forced?: 
   const { refresh } = useAuth();
   const [f, setF] = useState({ current: '', next: '', again: '' });
   const change = useMutation({
-    mutationFn: () => api('/auth/password', { method: 'POST', body: { current: f.current, next: f.next } }),
-    onSuccess: async () => { toast('تغيّرت كلمة المرور'); setF({ current: '', next: '', again: '' }); await refresh(); onDone(); },
+    mutationFn: () => api<{ token: string }>('/auth/password', { method: 'POST', body: { current: f.current, next: f.next } }),
+    // التغيير يُنهي كل جلسة سبقته؛ والخادم يعيد رمزاً جديداً لهذه الجلسة وحدها.
+    onSuccess: async (r) => { tokenStore.set(r.token); toast('تغيّرت كلمة المرور'); setF({ current: '', next: '', again: '' }); await refresh(); onDone(); },
   });
   const mismatch = !!f.again && f.next !== f.again;
   return (
@@ -28,13 +29,14 @@ export function PasswordForm({ onDone, forced }: { onDone: () => void; forced?: 
   );
 }
 
-function Totp() {
+export function Totp({ bare }: { bare?: boolean } = {}) {
   const toast = useToast();
   const { user, refresh } = useAuth();
   const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null);
   const [svg, setSvg] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
+  const [offCode, setOffCode] = useState('');
   useEffect(() => { if (setup) QRCode.toString(setup.uri, { type: 'svg', margin: 1 }).then(setSvg); }, [setup]);
   const start = useMutation({ mutationFn: () => api<{ secret: string; uri: string }>('/auth/totp/setup', { method: 'POST' }), onSuccess: setSetup });
   const enable = useMutation({
@@ -42,13 +44,13 @@ function Totp() {
     onSuccess: async () => { toast('فُعّل التحقق بعاملين'); setSetup(null); setCode(''); await refresh(); },
   });
   const disable = useMutation({
-    mutationFn: () => api('/auth/totp/disable', { method: 'POST', body: { password } }),
-    onSuccess: async () => { toast('عُطّل التحقق بعاملين'); setPassword(''); await refresh(); },
+    mutationFn: () => api('/auth/totp/disable', { method: 'POST', body: { password, code: offCode } }),
+    onSuccess: async () => { toast('عُطّل التحقق بعاملين'); setPassword(''); setOffCode(''); await refresh(); },
   });
   const error = start.error ?? enable.error ?? disable.error;
 
   return (
-    <div className="flex flex-col gap-3 border-t border-line pt-4">
+    <div className={bare ? 'flex flex-col gap-3' : 'flex flex-col gap-3 border-t border-line pt-4'}>
       <div className="flex items-center justify-between gap-3"><h3 className="font-bold">التحقق بعاملين</h3>{user?.totpEnabled ? <Badge tone="ok">مفعَّل</Badge> : <Badge tone={user?.totpRecommended ? 'warn' : 'neutral'}>غير مفعَّل</Badge>}</div>
       <p className="text-sm text-muted">عند الدخول يُطلب مع كلمة المرور رمز من تطبيق المصادقة على هاتفك، فلا تكفي الكلمة وحدها لمن سرقها.{user?.totpRecommended && !user.totpEnabled ? ' دورك يملك المال أو الصلاحيات، فتفعيله مطلوب منك.' : ''}</p>
       {error && <Alert>{error.message}</Alert>}
@@ -66,8 +68,9 @@ function Totp() {
       )}
       {user?.totpEnabled && (
         <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-48 flex-1"><Field label="لتعطيله: كلمة مرورك">{(id) => <Input id={id} dir="ltr" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />}</Field></div>
-          <Button variant="danger" disabled={!password || disable.isPending} onClick={() => disable.mutate()}>عطّل</Button>
+          <div className="min-w-40 flex-1"><Field label="لتعطيله: كلمة مرورك">{(id) => <Input id={id} dir="ltr" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />}</Field></div>
+          <div className="w-36"><Field label="ورمز من التطبيق">{(id) => <Input id={id} dir="ltr" inputMode="numeric" autoComplete="one-time-code" className="text-center tracking-[0.3em]" value={offCode} onChange={(e) => setOffCode(e.target.value)} />}</Field></div>
+          <Button variant="danger" disabled={!password || offCode.replace(/\D/g, '').length !== 6 || disable.isPending} onClick={() => disable.mutate()}>عطّل</Button>
         </div>
       )}
     </div>

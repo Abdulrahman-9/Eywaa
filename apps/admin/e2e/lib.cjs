@@ -22,6 +22,24 @@ async function login(page, username, password = PASSWORD) {
   await page.getByRole('heading', { name: 'الرئيسية' }).waitFor();
 }
 
+const TEMP = `${PASSWORD}-tmp`;
+
+/** أول دخول لموظف جديد: كلمته التي وضعها المدير مؤقتة، فيغيّرها ثم يعمل. يعيد رمز الجلسة بعد التغيير. */
+async function firstLogin(username, temp = TEMP, final = PASSWORD) {
+  const first = await call('/auth/login', null, { username, password: temp });
+  if (!first.token) throw new Error(`first login failed for ${username}: ${JSON.stringify(first)}`);
+  const changed = await call('/auth/password', first.token, { current: temp, next: final });
+  if (!changed.token) throw new Error(`password change failed for ${username}: ${JSON.stringify(changed)}`);
+  return changed.token;
+}
+
+/** ينشئ موظفاً ويُتمّ أول دخوله، فيعمل بكلمة الاختبار المعتادة. */
+async function createStaff(admin, { username, fullName, role, phone }) {
+  const made = await call('/users', admin, { username, fullName, password: TEMP, role, phone });
+  if (!made.id) throw new Error(`user create failed: ${JSON.stringify(made)}`);
+  return firstLogin(username);
+}
+
 /** ينشئ مستخدمين بأدوارهم ويعيد رموز دخولهم مع رمز المدير. */
 async function setupUsers(roles) {
   const admin = (await call('/auth/login', null, { username: 'admin', password: process.env.ADMIN_PASSWORD })).token;
@@ -31,9 +49,7 @@ async function setupUsers(roles) {
     names[key] = `${key}${RUN}`;
     // للمتعهد هاتف لازم: رقم فريد لكل تشغيل.
     const phone = role === 'DISTRIBUTION_AGENT' ? `077${RUN}${String(Object.keys(names).length).padStart(2, '0')}` : undefined;
-    const made = await call('/users', admin, { username: names[key], fullName, password: PASSWORD, role, phone });
-    if (!made.id) throw new Error(`user create failed: ${JSON.stringify(made)}`);
-    tokens[key] = (await call('/auth/login', null, { username: names[key], password: PASSWORD })).token;
+    tokens[key] = await createStaff(admin, { username: names[key], fullName, role, phone });
   }
   return { tokens, names };
 }
@@ -74,4 +90,4 @@ async function run(main) {
   }
 }
 
-module.exports = { BASE, RUN, PASSWORD, call, login, setupUsers, approvedFamily, run };
+module.exports = { BASE, RUN, PASSWORD, TEMP, call, login, setupUsers, createStaff, firstLogin, approvedFamily, run };

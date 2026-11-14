@@ -5,6 +5,7 @@
  */
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
+const { createStaff } = require('./lib.cjs');
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:4173';
 const SHOTS = process.argv[2];
@@ -29,9 +30,8 @@ async function login(page, username, password) {
 
 (async () => {
   const admin = (await call('/auth/login', null, { username: 'admin', password: process.env.ADMIN_PASSWORD })).token;
-  await call('/users', admin, { username: `res${RUN}`, fullName: 'باحث ميداني', password: PASSWORD, role: 'FIELD_RESEARCHER' });
-  await call('/users', admin, { username: `sup${RUN}`, fullName: 'مشرف المستفيدين', password: PASSWORD, role: 'BENEFICIARY_SUPERVISOR' });
-  const res = (await call('/auth/login', null, { username: `res${RUN}`, password: PASSWORD })).token;
+  const res = await createStaff(admin, { username: `res${RUN}`, fullName: 'باحث ميداني', role: 'FIELD_RESEARCHER' });
+  await createStaff(admin, { username: `sup${RUN}`, fullName: 'مشرف المستفيدين', role: 'BENEFICIARY_SUPERVISOR' });
   // أرملة بثلاثة أيتام في إيجار بلا دخل: 70 نقطة بالإصدار 1 (فئة أ).
   const names = ['سعاد كريم عبد الله الدليمي', 'عمر ياسين محمود الدليمي', 'نور ياسين محمود الدليمي', 'علي ياسين محمود الدليمي'];
   const widow = await call('/families', res, {

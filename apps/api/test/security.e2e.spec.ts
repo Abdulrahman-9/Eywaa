@@ -64,7 +64,10 @@ describe('أجهزة الميدان وسحبها', () => {
     const refused = await api().get('/api/families').set(withDevice('researcher'));
     expect(refused.status).toBe(403);
     expect(refused.body.code).toBe('DEVICE_REVOKED');
-    // الجلسة نفسها من غير ذلك الجهاز تعمل: السحب للجهاز لا للحساب.
+    // رمز الدخول الذي كان على الجهاز يُبطَل معه، فلا ينفع آخذَ الهاتف أن يحذف معرّف الجهاز من طلباته.
+    expect((await api().get('/api/families').set(as('researcher'))).status).toBe(401);
+    // وصاحب الحساب يدخل من غير ذلك الجهاز كما كان: السحب للجهاز لا للحساب.
+    tokens.researcher = await login(app, 'researcher');
     expect((await api().get('/api/families').set(as('researcher'))).status).toBe(200);
   });
 
@@ -126,11 +129,67 @@ describe('كلمة المرور', () => {
     const first = await signIn('supervisor', 'temporary-password-1');
     expect(first.body.user.mustChangePassword).toBe(true);
     const auth = { Authorization: `Bearer ${first.body.token}` };
-    await api().post('/api/auth/password').set(auth).send({ current: 'temporary-password-1', next: 'my-own-password-22' });
-    expect((await api().get('/api/auth/me').set(auth)).body.mustChangePassword).toBe(false);
+    // الكلمة المؤقتة لا تفتح شيئاً غير تغييرها.
+    const blocked = await api().get('/api/families').set(auth);
+    expect([blocked.status, blocked.body.code]).toEqual([403, 'PASSWORD_CHANGE_REQUIRED']);
+    const changed = await api().post('/api/auth/password').set(auth).send({ current: 'temporary-password-1', next: 'my-own-password-22' });
+    // التغيير يُنهي الجلسات السابقة ويعيد رمزاً جديداً لهذه.
+    expect((await api().get('/api/auth/me').set(auth)).status).toBe(401);
+    const fresh = { Authorization: `Bearer ${changed.body.token}` };
+    expect((await api().get('/api/auth/me').set(fresh)).body.mustChangePassword).toBe(false);
+    expect((await api().get('/api/families').set(fresh)).status).toBe(200);
     const log = await sql("select payload::text as p from audit_log where action = 'user.update' order by seq desc limit 1");
     expect(log.rows[0].p).toContain('"passwordReset": true');
     expect(log.rows[0].p).not.toContain('temporary-password-1');
+  });
+});
+
+describe('ما أضافته المراجعة إلى الدخول', () => {
+  it('المحاولات المتزامنة لا تعبر حدّ القفل: خمس تُفحص والباقي يُردّ', async () => {
+    await sql("update users set failed_logins = 0, locked_until = null where username = 'auditor'");
+    const burst = await Promise.all(Array.from({ length: 30 }, () => signIn('auditor', 'wrong-password-123')));
+    const checked = burst.filter((r) => r.status === 401).length;
+    expect(checked).toBeLessThanOrEqual(5);
+    expect(burst.filter((r) => r.status === 429).length).toBe(30 - checked);
+    expect((await signIn('auditor', PASSWORD)).status).toBe(429);
+    expect((await sql("select locked_until > now() as locked from users where username = 'auditor'")).rows[0].locked).toBe(true);
+    await sql("update users set failed_logins = 0, locked_until = null where username = 'auditor'");
+  });
+
+  it('حساب ينشئه المدير لا يفتح له شيء حتى يغيّر كلمته', async () => {
+    const made = await api().post('/api/users').set(as('admin')).send({ username: 'newcomer', fullName: 'موظف جديد', password: 'temporary-password-9', role: 'AUDITOR' });
+    expect(made.status).toBe(201);
+    const first = await signIn('newcomer', 'temporary-password-9');
+    expect(first.body.user.mustChangePassword).toBe(true);
+    const auth = { Authorization: `Bearer ${first.body.token}` };
+    expect((await api().get('/api/audit').set(auth)).body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+    expect((await api().get('/api/auth/me').set(auth)).status).toBe(200);
+    const changed = await api().post('/api/auth/password').set(auth).send({ current: 'temporary-password-9', next: 'a-word-of-my-own-77' });
+    expect((await api().get('/api/audit').set({ Authorization: `Bearer ${changed.body.token}` })).status).toBe(200);
+  });
+
+  it('تغيير كلمة المرور يُنهي الجلسات الأخرى', async () => {
+    const one = (await signIn('newcomer', 'a-word-of-my-own-77')).body.token;
+    const two = (await signIn('newcomer', 'a-word-of-my-own-77')).body.token;
+    const changed = await api().post('/api/auth/password').set({ Authorization: `Bearer ${one}` }).send({ current: 'a-word-of-my-own-77', next: 'another-word-of-mine-88' });
+    expect(changed.status).toBe(200);
+    expect((await api().get('/api/auth/me').set({ Authorization: `Bearer ${two}` })).status).toBe(401);
+    expect((await api().get('/api/auth/me').set({ Authorization: `Bearer ${changed.body.token}` })).status).toBe(200);
+  });
+
+  it('من يخمّن كلمة المرور من داخل جلسة مفتوحة يُقفل الحساب وتنتهي الجلسة', async () => {
+    const token = (await signIn('newcomer', 'another-word-of-mine-88')).body.token;
+    const auth = { Authorization: `Bearer ${token}` };
+    for (let i = 0; i < 5; i++) expect((await api().post('/api/auth/password').set(auth).send({ current: `guess-number-${i}-xx`, next: 'whatever-new-word-1' })).status).toBe(403);
+    expect((await api().get('/api/auth/me').set(auth)).status).toBe(401);
+    expect((await signIn('newcomer', 'another-word-of-mine-88')).status).toBe(429);
+  });
+
+  it('مسار الحياة عامّ ولا يكشف شيئاً، ومعرّف جهاز مشوّه لا يُسقط الخادم', async () => {
+    const health = await api().get('/api/health');
+    expect([health.status, health.body]).toEqual([200, { ok: true, db: true }]);
+    expect((await api().get('/api/auth/me').set({ ...as('admin'), 'X-Device-Id': '-'.repeat(36) })).status).toBe(200);
+    expect((await api().post('/api/auth/login').set('X-Device-Id', '-'.repeat(36)).send({ username: 'admin', password: PASSWORD })).status).toBe(200);
   });
 });
 
@@ -164,9 +223,13 @@ describe('التحقق بعاملين', () => {
     expect((await signIn('accountant', 'wrong-password-123', code)).body.code).toBeUndefined();
   });
 
-  it('يعطّله صاحبه بكلمة مروره', async () => {
-    expect((await api().post('/api/auth/totp/disable').set(auth()).send({ password: 'wrong' })).status).toBe(403);
-    expect((await api().post('/api/auth/totp/disable').set(auth()).send({ password: PASSWORD })).status).toBe(200);
+  it('يعطّله صاحبه بالعاملين معاً: كلمة المرور ورمز من التطبيق', async () => {
+    const code = codeAt(secret, stepAt(Date.now()));
+    const off = (body: object) => api().post('/api/auth/totp/disable').set(auth()).send(body);
+    expect((await off({ password: PASSWORD })).status).toBe(400);
+    expect((await off({ password: 'wrong', code })).status).toBe(403);
+    expect((await off({ password: PASSWORD, code: '000000' })).status).toBe(403);
+    expect((await off({ password: PASSWORD, code })).status).toBe(200);
     await sql("update users set failed_logins = 0, locked_until = null where username = 'accountant'");
     expect((await signIn('accountant', PASSWORD)).status).toBe(200);
   });

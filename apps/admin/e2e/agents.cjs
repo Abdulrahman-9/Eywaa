@@ -5,7 +5,7 @@
  * التشغيل (على قاعدة فارغة):  ADMIN_PASSWORD=... node e2e/agents.cjs [مجلد الصور]
  */
 const assert = require('node:assert/strict');
-const { RUN, PASSWORD, call, login, setupUsers, approvedFamily, run } = require('./lib.cjs');
+const { RUN, PASSWORD, TEMP, call, login, setupUsers, firstLogin, approvedFamily, run } = require('./lib.cjs');
 
 const daysAgo = (n) => new Date(Date.now() - n * 86_400_000).toISOString();
 
@@ -29,7 +29,7 @@ run(async ({ step, shot, newPage }) => {
     const d = admin.getByRole('dialog');
     await d.getByLabel('الاسم الكامل').fill('أبو أحمد الحلبوسي');
     await d.getByLabel('اسم المستخدم').fill(agentUser);
-    await d.getByLabel('كلمة مرور مؤقتة').fill(PASSWORD);
+    await d.getByLabel('كلمة مرور مؤقتة').fill(TEMP);
     // الهاتف لازم: الزر معطّل دونه.
     assert.equal(await d.getByRole('button', { name: 'أضف المتعهد' }).isDisabled(), true);
     await d.getByLabel('رقم الهاتف').fill('0770 123 4567');
@@ -38,7 +38,8 @@ run(async ({ step, shot, newPage }) => {
     await admin.getByRole('heading', { name: /أبو أحمد الحلبوسي/ }).waitFor();
     await admin.getByRole('link', { name: '07701234567' }).waitFor();
     agentId = admin.url().split('/').pop();
-    agentToken = (await call('/auth/login', null, { username: agentUser, password: PASSWORD })).token;
+    // كلمته مؤقتة: يغيّرها عند أول دخول، وقبل ذلك لا يفتح له الخادم شيئاً.
+    agentToken = await firstLogin(agentUser);
     assert.ok(agentToken);
   });
 

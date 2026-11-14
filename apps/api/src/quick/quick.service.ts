@@ -34,6 +34,9 @@ const INVITE = 'السلام عليكم {الاسم}. سُجّل طلبكم لد
  * طلبات التسجيل السريع. الطلب اسم وما تيسّر معه؛ يُستكمل بأحد طريقين: دعوة صاحبه للحضور، أو زيارة باحث.
  * وعند الاستكمال تُملأ استمارة التسجيل كاملةً فتمرّ بكشف التكرار والاعتماد كأي عائلة.
  */
+/** أهل السجل: من يحقّ لهم أن يعرفوا من المسجَّل. */
+const REGISTRY: readonly string[] = ['ADMIN', 'BENEFICIARY_SUPERVISOR', 'FIELD_RESEARCHER'];
+
 @Injectable()
 export class QuickService {
   constructor(
@@ -78,10 +81,18 @@ export class QuickService {
   async create(input: QuickInput, actor: AuthUser) {
     if (input.clientOpId) {
       const prior = await this.db.query('select id from quick_requests where client_op_id = $1', [input.clientOpId]);
-      if (prior.rows[0]) return this.get(prior.rows[0].id);
+      if (prior.rows[0]) return this.forCreator(await this.get(prior.rows[0].id), actor);
     }
     const row = await this.db.tx((c) => this.insert(c, input, actor));
-    return this.get(row.id);
+    return this.forCreator(await this.get(row.id), actor);
+  }
+
+  /**
+   * من يرفع الطلب من غير أهل السجل (موظف التوزيع والمتعهد) لا يُعاد إليه من يشبهه من العوائل المسجَّلة:
+   * لو أُعيد لصار الطلب وسيلة يُسأل بها «هل فلان مسجَّل عندكم؟». المطابقة يراها من يفصل في الطلب.
+   */
+  private forCreator<T extends { matches: unknown }>(r: T, actor: AuthUser): T {
+    return REGISTRY.includes(actor.role) ? r : { ...r, matches: { families: [], requests: [] } };
   }
 
   async get(id: string) {

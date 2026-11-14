@@ -12,6 +12,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const SHOTS = process.argv[2];
 const NEW_USER = `auditor.${Date.now().toString(36)}`;
 const NEW_PASSWORD = 'auditor-demo-password';
+const OWN_PASSWORD = 'auditor-own-password-1';
 
 const steps = [];
 const step = async (name, fn) => { await fn(); steps.push(name); console.log(`✓ ${name}`); };
@@ -65,8 +66,22 @@ async function login(page, username, password) {
   const staffCtx = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'ar-IQ' });
   const staff = await staffCtx.newPage();
 
-  await step('الموظف الجديد لا يرى «المستخدمون» في قائمته', async () => {
+  await step('الموظف الجديد يُلزَم بتغيير الكلمة التي وضعها المدير قبل أي شيء', async () => {
     await login(staff, NEW_USER, NEW_PASSWORD);
+    await staff.getByRole('heading', { name: 'ضع كلمة مرورك' }).waitFor();
+    // والخادم نفسه لا يفتح له شيئاً بها، لا الواجهة وحدها.
+    const blocked = await staff.evaluate(async () => {
+      const token = sessionStorage.getItem('eywaa.token');
+      return (await fetch('/api/audit', { headers: { Authorization: `Bearer ${token}` } })).status;
+    });
+    assert.equal(blocked, 403);
+    await staff.getByLabel('كلمة المرور الحالية').fill(NEW_PASSWORD);
+    await staff.getByLabel('كلمة المرور الجديدة').fill(OWN_PASSWORD);
+    await staff.getByLabel('أعِدها للتأكد').fill(OWN_PASSWORD);
+    await staff.getByRole('button', { name: 'غيّر كلمة المرور' }).click();
+  });
+
+  await step('الموظف الجديد لا يرى «المستخدمون» في قائمته', async () => {
     await staff.getByRole('heading', { name: 'الرئيسية' }).waitFor();
     await staff.getByRole('link', { name: 'سجل التدقيق' }).waitFor();
     assert.equal(await staff.getByRole('link', { name: 'المستخدمون' }).count(), 0);

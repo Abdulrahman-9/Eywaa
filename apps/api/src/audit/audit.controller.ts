@@ -10,7 +10,9 @@ export class AuditController {
   @Get()
   list(@Query('limit') limit?: string, @Query('before') before?: string) {
     const n = Math.min(Math.max(Number(limit) || 50, 1), 200);
-    return this.audit.list(n, before ? Number(before) : undefined);
+    // «before» رقم سطر. ما ليس رقماً يُهمَل، لا يُسقط الطلب.
+    const b = before && /^\d{1,15}$/.test(before) ? Number(before) : undefined;
+    return this.audit.list(n, b);
   }
 
   @Get('verify')

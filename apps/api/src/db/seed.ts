@@ -17,7 +17,8 @@ async function main() {
       return;
     }
     await client.query(
-      "insert into users (username, full_name, password_hash, role) values ($1, $2, $3, 'ADMIN')",
+      // كلمة الإنشاء تبقى في ملف البيئة على الخادم: يغيّرها المدير عند أول دخول فلا تنفع من قرأ الملف بعدها.
+      "insert into users (username, full_name, password_hash, role, must_change_password) values ($1, $2, $3, 'ADMIN', true)",
       [ADMIN_USERNAME, 'مدير النظام', await hashPassword(ADMIN_PASSWORD)],
     );
     console.log(`admin "${ADMIN_USERNAME}" created`);

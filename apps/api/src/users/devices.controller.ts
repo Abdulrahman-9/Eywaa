@@ -57,8 +57,10 @@ export class DevicesController {
   @Roles('ADMIN')
   async revoke(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(revokeSchema)) body: z.infer<typeof revokeSchema>, @CurrentUser() user: AuthUser) {
     await this.db.tx(async (c) => {
-      const { rowCount } = await c.query('update devices set revoked_at = now(), revoked_by = $2, revoke_note = $3 where id = $1 and revoked_at is null', [id, user.id, body.note]);
-      if (!rowCount) throw new NotFoundException('الجهاز غير موجود أو سُحب من قبل');
+      const { rows } = await c.query('update devices set revoked_at = now(), revoked_by = $2, revoke_note = $3 where id = $1 and revoked_at is null returning user_id', [id, user.id, body.note]);
+      if (!rows[0]) throw new NotFoundException('الجهاز غير موجود أو سُحب من قبل');
+      // رمز الدخول المحفوظ على الجهاز يُبطَل معه: من أخذ الهاتف مفتوحاً لا ينفعه أن يحذف معرّف الجهاز من طلباته.
+      await c.query('update users set token_version = token_version + 1 where id = $1', [rows[0].user_id]);
       await this.audit.append(c, { actorId: user.id, action: 'device.revoke', entity: 'device', entityId: id, payload: { note: body.note } });
     });
     return { revoked: true };

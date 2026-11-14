@@ -11,6 +11,8 @@ export interface User {
   mustChangePassword?: boolean;
   totpEnabled?: boolean;
   totpRecommended?: boolean;
+  /** دوره مُلزَم بالتحقق بعاملين في هذا النشر: لا يفتح له الخادم شيئاً حتى يفعّله. */
+  totpRequired?: boolean;
 }
 
 interface AuthState {

@@ -19,7 +19,9 @@ export class FieldCrypto {
 
   decrypt(token: string): string {
     const raw = Buffer.from(token, 'base64');
-    const decipher = createDecipheriv('aes-256-gcm', this.encKey, raw.subarray(0, 12));
+    if (raw.length < 28) throw new Error('ciphertext too short');
+    // طول الوسم مثبَّت: بغيره يقبل Node وسماً مبتوراً إلى أربعة بايتات، فيسهل تزوير نص مشفّر.
+    const decipher = createDecipheriv('aes-256-gcm', this.encKey, raw.subarray(0, 12), { authTagLength: 16 });
     decipher.setAuthTag(raw.subarray(12, 28));
     return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
   }
@@ -33,7 +35,8 @@ export class FieldCrypto {
   }
 
   decryptBuffer(raw: Buffer): Buffer {
-    const decipher = createDecipheriv('aes-256-gcm', this.encKey, raw.subarray(0, 12));
+    if (raw.length < 28) throw new Error('ciphertext too short');
+    const decipher = createDecipheriv('aes-256-gcm', this.encKey, raw.subarray(0, 12), { authTagLength: 16 });
     decipher.setAuthTag(raw.subarray(12, 28));
     return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]);
   }

@@ -7,6 +7,12 @@ import { FieldCrypto } from '../common/crypto';
 import { Db } from '../db/db.module';
 import { SendResult, chainFor, Channel, Channels, render, unknownVariables } from './channels';
 
+
+/** ثماني خانات مكان الرمز الرقمي حيث يُحجب. */
+const MASKED_CODE = '••••••••';
+/** الرمز الرقمي ثماني خانات تماماً؛ والهاتف ورقم العائلة ليسا كذلك. */
+export const maskCodes = (text: string) => text.replace(/(?<![\d٠-٩])[\d٠-٩]{8}(?![\d٠-٩])/g, MASKED_CODE);
+
 export const audienceSchema = z.object({
   campaignId: z.string().uuid().optional(),
   /** في حملة: من لم يستلم بعد فقط. */
@@ -74,14 +80,15 @@ export class NotificationsService {
     }));
   }
 
-  private textFor(body: string, r: Recipient): string {
+  /** hideCode: للمعاينة. الرمز الرقمي يملك به صاحبه الاستلام، فلا يُعرض على من يكتب الرسالة. */
+  private textFor(body: string, r: Recipient, hideCode = false): string {
     return render(body, {
       'الاسم': r.headName, 'رقم_العائلة': r.familyNo, 'النقطة': r.point,
       // مكان الحضور كاملاً: اسم النقطة، وعنوانها وساعاتها إن ضُبطا.
       'مكان_الحضور': r.point ? `نقطة ${r.point}${r.pointAddress ? `، ${r.pointAddress}` : ''}${r.pointHours ? ` (${r.pointHours})` : ''}` : undefined,
       'آخر_موعد': r.endsOn ? dateAr.format(new Date(r.endsOn)) : undefined,
       'المقدار': r.quantity !== undefined ? `${r.quantity} ${r.unit ?? ''}`.trim() : undefined,
-      'الرمز_الرقمي': r.codeEnc ? this.crypto.decrypt(r.codeEnc) : undefined,
+      'الرمز_الرقمي': r.codeEnc ? (hideCode ? MASKED_CODE : this.crypto.decrypt(r.codeEnc)) : undefined,
     });
   }
 
@@ -101,9 +108,9 @@ export class NotificationsService {
     for (const r of list) byChannel[r.phone ? chainFor(r)[0] : 'NO_PHONE']++;
     return {
       recipients: list.length, byChannel, needsApproval: list.length > threshold, threshold,
-      sample: list[0] ? this.textFor(input.body, list[0]) : null,
+      sample: list[0] ? this.textFor(input.body, list[0], true) : null,
       // الرسالة النصية الواحدة بالعربية 70 حرفاً، وما زاد يُقسَّم على رسائل من 67.
-      smsParts: list[0] ? (this.textFor(input.body, list[0]).length <= 70 ? 1 : Math.ceil(this.textFor(input.body, list[0]).length / 67)) : 0,
+      smsParts: list[0] ? (this.textFor(input.body, list[0], true).length <= 70 ? 1 : Math.ceil(this.textFor(input.body, list[0], true).length / 67)) : 0,
       driver: { name: this.channels.current.name, live: this.channels.current.live },
     };
   }
@@ -291,7 +298,8 @@ export class NotificationsService {
        where m.family_id = $1 order by m.sent_at desc limit 50`,
       [familyId],
     );
-    return rows.map((r) => ({ id: r.id, channel: r.channel, status: r.status, text: r.text, sentAt: r.sent_at, title: r.title, kind: r.kind, hasImage: r.has_image && r.channel === 'WHATSAPP' }));
+    // نص الدعوة فيه الرمز الرقمي: يُحجب في العرض، فلا يقرؤه من ملف العائلة من لا يسلّم.
+    return rows.map((r) => ({ id: r.id, channel: r.channel, status: r.status, text: maskCodes(r.text), sentAt: r.sent_at, title: r.title, kind: r.kind, hasImage: r.has_image && r.channel === 'WHATSAPP' }));
   }
 
   driver() {

@@ -157,7 +157,12 @@ describe('رسائل النظام مع الحملة', () => {
     expect(invite).toMatchObject({ title: 'دعوة الاستلام: سلة الشهر', recipients: 4, sent: 3, noPhone: 1 });
     const t = toks.find((x) => x.familyNo === fams[0].familyNo);
     const text = (await get(`/families/${fams[0].id}/messages`, 'auditor')).body[0].text;
-    expect(text).toContain(t.code);
+    // الرسالة التي خرجت إلى العائلة فيها رمزها؛ وسجل الرسائل في ملفها يحجبه عمّن يطالعه.
+    expect(text).not.toContain(t.code);
+    expect(text).toContain('الرمز: ••••••••');
+    expect((await sql('select text from messages where family_id = $1 order by sent_at desc limit 1', [fams[0].id])).rows[0].text).toContain(t.code);
+    const draft = await post('/notifications/preview', 'manager', { title: 'تجربة', body: 'رمزكم {الرمز_الرقمي}', audience: { campaignId: (await sql('select campaign_id from entitlements where family_id = $1 limit 1', [fams[0].id])).rows[0].campaign_id } });
+    expect(draft.body.sample).toBe('رمزكم ••••••••');
     expect(text).toContain('نقطة الجولان');
     expect(text).toContain('1 سلة');
     expect(text).not.toContain('{');

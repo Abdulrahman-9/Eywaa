@@ -1,5 +1,5 @@
 import { Link, Navigate, Route, Routes } from 'react-router-dom';
-import { PasswordForm } from './components/Account';
+import { PasswordForm, Totp } from './components/Account';
 import { Shell } from './components/Shell';
 import { Card, Skeleton } from './components/ui';
 import { useAuth } from './lib/auth';
@@ -59,6 +59,17 @@ export function App() {
       <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6">
         <h1 className="text-2xl font-bold">ضع كلمة مرورك</h1>
         <PasswordForm forced onDone={() => {}} />
+      </div>
+    );
+  }
+  // دور يملك المال أو الصلاحيات، والنشر يُلزمه بالتحقق بعاملين: يفعّله أولاً.
+  if (user.totpRequired && !user.totpEnabled) {
+    return (
+      <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6">
+        <h1 className="text-2xl font-bold">فعّل التحقق بعاملين</h1>
+        <p className="text-muted">دورك يملك المال أو الصلاحيات، فلا يُفتح حسابك بكلمة المرور وحدها. نصّب على هاتفك تطبيق مصادقة (مثل Google Authenticator أو Aegis) ثم ابدأ.</p>
+        <Totp bare />
+        <button type="button" onClick={logout} className="min-h-11 self-start font-semibold text-muted underline">تسجيل الخروج</button>
       </div>
     );
   }

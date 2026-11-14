@@ -4,6 +4,7 @@
  * التشغيل (على قاعدة فارغة):  ADMIN_PASSWORD=... node e2e/families.cjs [مجلد الصور]
  */
 const { chromium } = require('playwright');
+const { createStaff } = require('./lib.cjs');
 const assert = require('node:assert/strict');
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:4173';
@@ -40,7 +41,7 @@ async function fillHead(page, name, mother, birth, nid) {
 (async () => {
   const admin = (await apiCall('/auth/login', null, { username: 'admin', password: process.env.ADMIN_PASSWORD })).token;
   for (const [username, fullName, role] of [[`res${RUN}`, 'باحث ميداني', 'FIELD_RESEARCHER'], [`sup${RUN}`, 'مشرف المستفيدين', 'BENEFICIARY_SUPERVISOR']]) {
-    await apiCall('/users', admin, { username, fullName, password: PASSWORD, role });
+    await createStaff(admin, { username, fullName, role });
   }
 
   const browser = await chromium.launch();

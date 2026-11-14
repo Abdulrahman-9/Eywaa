@@ -69,7 +69,8 @@ export class UsersController {
     try {
       return await this.db.tx(async (c) => {
         const { rows } = await c.query(
-          'insert into users (username, full_name, password_hash, role, phone) values ($1, $2, $3, $4, $5) returning id, username, role, phone',
+          // الكلمة التي وضعها المدير يعرفها المدير: صاحب الحساب يغيّرها عند أول دخول، والخادم يمنعه من غير ذلك.
+          'insert into users (username, full_name, password_hash, role, phone, must_change_password) values ($1, $2, $3, $4, $5, true) returning id, username, role, phone',
           [body.username, body.fullName, passwordHash, body.role, phone],
         );
         await this.audit.append(c, {
@@ -103,7 +104,8 @@ export class UsersController {
         `update users set active = coalesce($2, active), role = coalesce($3, role),
                 password_hash = coalesce($4, password_hash), must_change_password = must_change_password or $4 is not null,
                 failed_logins = case when $5 then 0 else failed_logins end, locked_until = case when $5 then null else locked_until end,
-                totp_enabled = case when $5 then false else totp_enabled end, totp_secret_enc = case when $5 then null else totp_secret_enc end
+                totp_enabled = case when $5 then false else totp_enabled end, totp_secret_enc = case when $5 then null else totp_secret_enc end,
+                token_version = token_version + case when $4 is not null or $5 then 1 else 0 end
          where id = $1 returning id, username, role, active, phone, full_name as "fullName"`,
         [id, body.active ?? null, body.role ?? null, passwordHash, !!body.resetAccess],
       );

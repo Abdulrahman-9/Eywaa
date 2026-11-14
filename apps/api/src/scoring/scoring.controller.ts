@@ -2,6 +2,9 @@ import { Body, Controller, Get, HttpCode, Inject, Param, ParseIntPipe, ParseUUID
 import { AnyRole, AuthUser, CurrentUser, Roles } from '../auth/auth.guard';
 import { ScoringService } from './scoring.service';
 
+/** الملاحظة نص قصير أو لا شيء؛ وما جاء غير ذلك لا يُسقط الطلب. */
+const noteOf = (body: { note?: unknown } | undefined) => (typeof body?.note === 'string' ? body.note.trim().slice(0, 500) || undefined : undefined);
+
 @Controller()
 export class ScoringController {
   constructor(@Inject(ScoringService) private readonly scoring: ScoringService) {}
@@ -29,14 +32,14 @@ export class ScoringController {
   @HttpCode(200)
   @Roles('ADMIN', 'BENEFICIARY_SUPERVISOR')
   approve(@Param('version', ParseIntPipe) version: number, @Body() body: { note?: string }, @CurrentUser() user: AuthUser) {
-    return this.scoring.decide(version, true, body?.note?.trim() || undefined, user);
+    return this.scoring.decide(version, true, noteOf(body), user);
   }
 
   @Post('scoring/versions/:version/reject')
   @HttpCode(200)
   @Roles('ADMIN', 'BENEFICIARY_SUPERVISOR')
   reject(@Param('version', ParseIntPipe) version: number, @Body() body: { note?: string }, @CurrentUser() user: AuthUser) {
-    return this.scoring.decide(version, false, body?.note?.trim() || undefined, user);
+    return this.scoring.decide(version, false, noteOf(body), user);
   }
 
   @Get('families/:id/score')
