@@ -13,7 +13,7 @@ import { CONFIG, Db } from '../db/db.module';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProgramsService } from '../programs/programs.service';
-import { laneOf, Manifest } from './offline';
+import { codeCheckFor, laneOf, Manifest } from './offline';
 import { TokenSigner, verifyToken } from './token';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -329,6 +329,7 @@ export class DistributionService {
       publicKey: this.signer.publicKeyB64, endsAt: Math.floor(end.getTime() / 1000),
       entries: mine.map((r) => ({
         id: r.id, familyNo: r.family_no, headName: r.head_name, quantity: r.quantity, codeHash: r.code_hash, status: r.status,
+        codeCheck: r.code_enc ? codeCheckFor(r.id, this.crypto.decrypt(r.code_enc)) : null,
         receivers: [{ kind: 'HEAD' as const, name: r.head_name }, ...proxies.rows.filter((p) => p.family_id === r.family_id).map((p) => ({ kind: 'PROXY' as const, name: p.full_name }))],
       })),
     };

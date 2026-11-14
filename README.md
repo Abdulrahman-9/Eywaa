@@ -33,6 +33,18 @@ pnpm dev                    # ثم افتح العنوان الذي يطبعه
 ADMIN_PASSWORD=... node e2e/smoke.cjs
 ```
 
+## تطبيق الميدان (الجوال)
+
+تطبيق ويب يُنصَّب على هاتف أندرويد من المتصفح (PWA) ويعمل بلا شبكة. يخدمه الخادم نفسه تحت `/m`.
+
+```bash
+cd apps/mobile
+pnpm build                       # الناتج في dist، ويخدمه الخادم إن ضُبط MOBILE_DIST
+MOBILE_DIST=$PWD/dist node ../api/dist/main.js
+```
+
+على الهاتف: افتح `https://عنوان-الخادم/m/` في Chrome، ثم من القائمة «إضافة إلى الشاشة الرئيسية». **يلزم HTTPS**: الكاميرا وعامل الخدمة والتشفير لا تعمل في المتصفح بدونه.
+
 ## النشر على خادم
 
 يلزم خادم فيه Docker واسم نطاق يشير إليه.
@@ -66,4 +78,12 @@ pnpm jest --rootDir . --testMatch '**/*.bench.ts' --testTimeout 900000
 
 # اختبارات المتصفح، كل ملف على قاعدة فارغة والخادم واللوحة يعملان:
 cd ../admin && ADMIN_PASSWORD=... node e2e/families.cjs
+```
+
+اختبار تطبيق الميدان (على قاعدة فارغة، والخادم يخدم `apps/mobile/dist`):
+
+```bash
+cd apps/mobile
+ADMIN_PASSWORD=... BASE_URL=http://localhost:3000 node e2e/mobile.cjs   # 19 خطوة: متصلاً ومنقطعاً والمزامنة
+ADMIN_PASSWORD=... BASE_URL=http://localhost:3000 node e2e/scan.cjs     # الماسح بكاميرا وهمية
 ```

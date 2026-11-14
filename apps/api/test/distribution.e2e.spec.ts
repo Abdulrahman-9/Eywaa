@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'crypto';
 import request from 'supertest';
-import { checkOffline, LocalDelivery, Manifest } from '../src/distribution/offline';
+import { checkOffline, checkOfflineCode, LocalDelivery, Manifest } from '../src/distribution/offline';
 import { TokenSigner, verifyToken } from '../src/distribution/token';
 import { family, login, sql, startApp, uniqueName } from './helpers';
 
@@ -274,6 +274,22 @@ describe('التسليم دون اتصال', () => {
     expect(checkOffline(t.token.slice(0, -4) + 'AAAA', home, [], now)).toEqual({ ok: false, reason: 'BAD_SIGNATURE' });
     expect(checkOffline(t.token, home, [], home.endsAt + 1)).toEqual({ ok: false, reason: 'EXPIRED' });
     expect(checkOffline(t.token, { ...home, campaignId: randomUUID() }, [], now)).toEqual({ ok: false, reason: 'OTHER_CAMPAIGN' });
+  });
+
+  it('الرمز الرقمي يُتحقَّق منه والجهاز منقطع: يقبله جهازه وحده، والخاطئ ورقم غير البيان بجواب واحد', () => {
+    const t = camp.toks[0];
+    const d = manifests.findIndex((m) => m.entries.some((e) => e.id === t.entitlementId));
+    expect(manifests[d].entries.every((e) => typeof e.codeCheck === 'string' && e.codeCheck.length > 10)).toBe(true);
+    // في المخزن المحلي تسليمه السابق بالرمز المصوَّر، فيُرفض مكرَّراً.
+    expect(checkOfflineCode(t.familyNo, t.code, manifests[d], stores[d], now)).toEqual({ ok: false, reason: 'ALREADY_DELIVERED' });
+    const fresh = checkOfflineCode(t.familyNo, t.code, manifests[d], [], now);
+    expect(fresh.ok && fresh.entry.id).toBe(t.entitlementId);
+    const wrong = String((Number(t.code) + 1) % 100000000).padStart(8, '0');
+    expect(checkOfflineCode(t.familyNo, wrong, manifests[d], [], now)).toEqual({ ok: false, reason: 'BAD_SIGNATURE' });
+    expect(checkOfflineCode('0000000', t.code, manifests[d], [], now)).toEqual({ ok: false, reason: 'BAD_SIGNATURE' });
+    const other = manifests[(d + 1) % 4];
+    expect(checkOfflineCode(t.familyNo, t.code, other, [], now)).toEqual({ ok: false, reason: 'BAD_SIGNATURE' });
+    expect(checkOfflineCode(t.familyNo, t.code, manifests[d], [], manifests[d].endsAt + 1)).toEqual({ ok: false, reason: 'EXPIRED' });
   });
 
   it('المزامنة ترفع ما سُلِّم، وإعادتها لا تكرّر', async () => {

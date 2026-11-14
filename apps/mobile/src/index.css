@@ -1,0 +1,31 @@
+@import '@fontsource/ibm-plex-sans-arabic/400.css';
+@import '@fontsource/ibm-plex-sans-arabic/600.css';
+@import '@fontsource/ibm-plex-sans-arabic/700.css';
+@import 'tailwindcss';
+
+/* الألوان والخط نفسها التي في لوحة الإدارة. */
+@theme {
+  --font-sans: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --color-ground: #f4f6f3;
+  --color-surface: #ffffff;
+  --color-ink: #16211d;
+  --color-muted: #56635d;
+  --color-line: #dde3de;
+  --color-line-strong: #b9c4bd;
+  --color-brand: #0f6b5c;
+  --color-brand-strong: #0b5548;
+  --color-brand-soft: #e4efea;
+  --color-nav: #10231e;
+  --color-warn-ink: #7a4a06;
+  --color-warn-soft: #fbeed6;
+  --color-danger: #a12a2a;
+  --color-danger-soft: #fbe6e4;
+}
+
+html { font-family: var(--font-sans); background: var(--color-ground); color: var(--color-ink); line-height: 1.6; -webkit-text-size-adjust: 100%; }
+body { margin: 0; overscroll-behavior-y: contain; }
+:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+button { touch-action: manipulation; }
+
+/* حقل التاريخ في أندرويد له عرض أدنى يفيض به الصف؛ يُلغى ليتبع عمودَه. */
+input[type='date'] { min-inline-size: 0; appearance: none; -webkit-appearance: none; }

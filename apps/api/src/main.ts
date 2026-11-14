@@ -20,6 +20,15 @@ async function bootstrap() {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     next();
   });
+  // تطبيق الجوال (يُنصَّب من المتصفح) يُخدم تحت /m. ملف عامل الخدمة لا يُحفظ في المتصفح، ليصل التحديث إلى الأجهزة.
+  const mobileDist = process.env.MOBILE_DIST ? resolve(process.env.MOBILE_DIST) : null;
+  if (mobileDist && existsSync(join(mobileDist, 'index.html'))) {
+    app.use('/m/assets', express.static(join(mobileDist, 'assets'), { immutable: true, maxAge: '365d', fallthrough: false,
+      setHeaders: (res: { setHeader: (k: string, v: string) => void }) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable') }));
+    app.use('/m', express.static(mobileDist, { index: false }));
+    app.use('/m', (req: { method: string }, res: { sendFile: (p: string) => void }, next: () => void) =>
+      req.method === 'GET' ? res.sendFile(join(mobileDist, 'index.html')) : next());
+  }
   // في النشر يخدم الخادم نفسه لوحة الإدارة المبنيّة، فيكفي النظامَ حاويةٌ واحدة وعنوان واحد.
   const adminDist = process.env.ADMIN_DIST ? resolve(process.env.ADMIN_DIST) : null;
   if (adminDist && existsSync(join(adminDist, 'index.html'))) {

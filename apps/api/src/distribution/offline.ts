@@ -1,3 +1,4 @@
+import { pbkdf2Sync } from 'crypto';
 import { verifyToken } from './token';
 
 /**
@@ -13,6 +14,8 @@ export interface ManifestEntry {
   headName: string;
   quantity: number;
   codeHash: string | null;
+  /** برهان الرمز الرقمي ليتحقق منه الجهاز وهو منقطع. null إن لم يكن للاستحقاق رمز رقمي. */
+  codeCheck?: string | null;
   status: 'PENDING' | 'DELIVERED' | 'CANCELLED';
   receivers: { kind: 'HEAD' | 'PROXY'; name: string }[];
 }
@@ -50,3 +53,25 @@ export function checkOffline(token: string, manifest: Manifest, delivered: Local
  * فتتساوى الشبابيك مهما كان توزيع الأرقام على النقاط.
  */
 export const laneOf = (indexInPoint: number, lanes: number) => (indexInPoint % lanes) + 1;
+
+const CODE_ROUNDS = 1000;
+
+/**
+ * برهان الرمز الرقمي في بيان الجهاز. مشتقّ بطيء مملَّح بمعرّف الاستحقاق.
+ * حدّه: الرمز ثماني خانات، فمن استخرج البيان من الجهاز قدر أن يجرّب الأرقام كلها.
+ * فهو يصدّ من يخمّن رمز غيره عند الشبّاك، لا موظفاً يعبث بجهازه؛ وذاك تكشفه رسالة التأكيد التي تصل العائلة.
+ */
+export function codeCheckFor(entitlementId: string, code: string): string {
+  return pbkdf2Sync(code.replace(/\D/g, ''), entitlementId, CODE_ROUNDS, 16, 'sha256').toString('base64');
+}
+
+/** التحقق برقم العائلة والرمز الرقمي والجهاز منقطع. */
+export function checkOfflineCode(familyNo: string, code: string, manifest: Manifest, delivered: LocalDelivery[], nowSec: number): OfflineCheck {
+  if (nowSec > manifest.endsAt) return { ok: false, reason: 'EXPIRED' };
+  const entry = manifest.entries.find((e) => e.familyNo === familyNo.trim());
+  // رقم ليس في البيان ورمز خاطئ يُجابان بجواب واحد، فلا يُعرف منه أيّ الأرقام في هذا الشبّاك.
+  if (!entry || !entry.codeCheck || entry.codeCheck !== codeCheckFor(entry.id, code)) return { ok: false, reason: 'BAD_SIGNATURE' };
+  if (entry.status === 'CANCELLED') return { ok: false, reason: 'CANCELLED' };
+  if (entry.status === 'DELIVERED' || delivered.some((d) => d.entitlementId === entry.id)) return { ok: false, reason: 'ALREADY_DELIVERED' };
+  return { ok: true, entry };
+}

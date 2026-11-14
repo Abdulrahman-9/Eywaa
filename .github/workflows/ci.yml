@@ -32,3 +32,6 @@ jobs:
       - name: Admin type-check and build
         working-directory: apps/admin
         run: pnpm build
+      - name: Mobile type-check and build
+        working-directory: apps/mobile
+        run: pnpm build
