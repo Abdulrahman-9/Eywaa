@@ -4,7 +4,7 @@ import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Skeleton } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatNumber } from '../lib/format';
+import { formatNumber, digits } from '../lib/format';
 import { HOUSING, TAGS, type Housing, type Tag } from '../lib/labels';
 import { CLASS_AR } from './Scoring';
 
@@ -31,7 +31,7 @@ const TEMPLATES: { label: string; draft: Omit<Draft, 'id'> }[] = [
 ];
 
 const blank = (): Draft => ({ name: '', kind: 'IN_KIND', unit: 'سلة', rules: {}, amount: { type: 'FIXED', value: 1 }, minGapDays: 0, active: true, itemId: null });
-const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
+const int = (v: string) => Number(digits(v)) || 0;
 
 export function describeAmount(a: Amount, unit: string): string {
   if (a.type === 'FIXED') return `${formatNumber(a.value)} ${unit}`;

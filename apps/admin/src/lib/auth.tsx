@@ -32,6 +32,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     tokenStore.set(null);
+    // المسودات فيها أسماء وأرقام وثائق: لا تبقى في المتصفح لمن يجلس بعده إلى الحاسوب.
+    try {
+      for (const key of Object.keys(sessionStorage)) if (key.startsWith('eywaa.') && !key.startsWith('eywaa.desk.')) sessionStorage.removeItem(key);
+    } catch { /* لا تخزين */ }
     setUser(null);
     queryClient.clear();
   }, [queryClient]);

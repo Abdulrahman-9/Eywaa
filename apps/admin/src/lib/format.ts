@@ -30,3 +30,8 @@ export function formatAgo(iso: string | null): string {
   return days <= 10 ? `منذ ${days} أيام` : `منذ ${days} يوماً`;
 }
 export const formatDays = (n: number) => (n === 0 ? 'اليوم' : n === 1 ? 'يوم واحد' : n === 2 ? 'يومان' : n <= 10 ? `${n} أيام` : `${n} يوماً`);
+
+/** الأرقام العربية والفارسية إلى لاتينية: من كتب «٥٠٠٠٠» بلوحة مفاتيحه العربية يُقرأ ما كتبه، لا صفراً. */
+export const latin = (v: string) => v.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x660)).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x6f0));
+/** خانات النص وحدها، بعد توحيد الأرقام. */
+export const digits = (v: string) => latin(v).replace(/\D/g, '');

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { digits } from '../lib/format';
 import { AidMotif } from '../components/AidMotif';
 import { Alert, Button, Field, Input } from '../components/ui';
 import { ApiError } from '../lib/api';
@@ -54,7 +55,7 @@ export function Login() {
               {(id) => <Input id={id} dir="ltr" inputMode="numeric" autoComplete="one-time-code" autoFocus className="text-center text-xl tracking-[0.4em]" value={code} onChange={(e) => setCode(e.target.value)} />}
             </Field>
           )}
-          <Button type="submit" disabled={busy || !username || !password || (needCode && code.replace(/\D/g, '').length !== 6)}>{busy ? 'جارٍ الدخول…' : 'دخول'}</Button>
+          <Button type="submit" disabled={busy || !username || !password || (needCode && digits(code).length !== 6)}>{busy ? 'جارٍ الدخول…' : 'دخول'}</Button>
         </form>
       </div>
     </div>

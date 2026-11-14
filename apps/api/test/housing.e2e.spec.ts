@@ -59,7 +59,7 @@ describe('مشروع بناء منزل', () => {
     expect(early.body.message).toBe('لا تُصرف دفعة مرحلة لم تُسجَّل لها زيارة تحقق');
     expect((await post(`/housing/stages/${s1.id}/verify`, 'projects', { note: 'زرت الموقع' })).status).toBe(409);
     expect((await post(`/housing/stages/${s1.id}/claim`, 'projects', {})).status).toBe(400);
-    await post(`/housing/stages/${s1.id}/claim`, 'projects', { note: 'قال المتعهد إن الأساس تمّ' });
+    await post(`/housing/stages/${s1.id}/claim`, 'projects', { note: 'قال المقاول إن الأساس تمّ' });
     expect((await post(`/housing/stages/${s1.id}/approve`, 'projects2')).status).toBe(409);
     expect((await fund()).cash).toBe(30_000_000);
   });
@@ -95,12 +95,12 @@ describe('مشروع بناء منزل', () => {
 
   it('المراحل بترتيبها: لا تُطلب الثالثة والثانية لم تُصرف', async () => {
     const [, s2, s3] = await stages();
-    const skip = await post(`/housing/stages/${s3.id}/claim`, 'projects', { note: 'يريد المتعهد دفعة التشطيب' });
+    const skip = await post(`/housing/stages/${s3.id}/claim`, 'projects', { note: 'يريد المقاول دفعة التشطيب' });
     expect(skip.status).toBe(409);
-    expect((await post(`/housing/stages/${s2.id}/claim`, 'projects', { note: 'رفع المتعهد صور الهيكل' })).status).toBe(200);
+    expect((await post(`/housing/stages/${s2.id}/claim`, 'projects', { note: 'رفع المقاول صور الهيكل' })).status).toBe(200);
   });
 
-  it('المرحلة التي لم تتمّ تُعاد إلى المتعهد، وصورها تُرفق بملف العائلة', async () => {
+  it('المرحلة التي لم تتمّ تُعاد إلى المقاول، وصورها تُرفق بملف العائلة', async () => {
     const [, s2] = await stages();
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('JFIF-site')]);
     expect((await api().post(`/api/housing/stages/${s2.id}/photos`).set(as('projects')).attach('file', jpeg, 'roof.jpg')).status).toBe(201);
@@ -115,7 +115,7 @@ describe('مشروع بناء منزل', () => {
   it('لا تُصرف دفعة يتجاوزها نقد الصندوق، وبصرف الأخيرة يُسلَّم المنزل', async () => {
     const pay = async (index: number) => {
       const s = (await stages())[index];
-      await post(`/housing/stages/${s.id}/claim`, 'projects', { note: 'طلب المتعهد' });
+      await post(`/housing/stages/${s.id}/claim`, 'projects', { note: 'طلب المقاول' });
       await post(`/housing/stages/${s.id}/verify`, 'projects', { note: 'زرت الموقع وتحققت' });
       return post(`/housing/stages/${s.id}/approve`, 'projects2');
     };

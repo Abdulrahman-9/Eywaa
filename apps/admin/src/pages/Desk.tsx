@@ -64,6 +64,9 @@ export function Desk() {
   function submit(l: Locate) { setLocate(l); setReceiver(null); redeem.reset(); check.mutate(l); }
 
   const refusal = (check.error ?? redeem.error) as ApiError | null;
+  // انقطاع أو عطل خادم بعد «سلّم وسجّل»: لا يُعرف هل سُجّل. يُعاد الطلب نفسه بمعرّفه، فإن كان قد سُجّل لم يتكرّر؛
+  // ولو مُسح وصُوِّر الرمز من جديد لظهر «استُعمل من قبل» ورُفع بلاغ على موظف لم يخطئ.
+  const retryable = !!redeem.error && !(redeem.error instanceof ApiError && redeem.error.status >= 400 && redeem.error.status < 500);
   const refusalDetails = refusal instanceof ApiError ? (refusal.details as { code?: string; details?: { familyNo?: string; deliveredAt?: string; point?: string; receiverName?: string } }) : null;
   const ready = active.some((c) => c.id === campaignId) && !!pointId;
   const info = check.data;
@@ -94,8 +97,8 @@ export function Desk() {
 
       {refusal && !done && (
         <div role="alert" className="flex flex-col gap-4 rounded-xl bg-danger p-6 text-white">
-          <strong className="text-3xl">{refusal.message.startsWith('لا تسلّم') ? 'لا تسلّم' : 'تعذّر التحقق'}</strong>
-          <span className="text-xl">{refusal.message.replace('لا تسلّم: ', '')}</span>
+          <strong className="text-3xl">{retryable ? 'لم يصل جواب الخادم' : refusal.message.startsWith('لا تسلّم') ? 'لا تسلّم' : 'تعذّر التحقق'}</strong>
+          <span className="text-xl">{retryable ? 'لا يُعرف هل سُجّل التسليم. لا تسلّم ثانية ولا تمسح: أعد الإرسال، فإن كان قد سُجّل لم يتكرّر.' : refusal.message.replace('لا تسلّم: ', '')}</span>
           {refusalDetails?.code === 'ALREADY_DELIVERED' && refusalDetails.details && (
             <div className="rounded-lg bg-white p-4 text-ink">
               <strong>العائلة {refusalDetails.details.familyNo}</strong>
@@ -104,7 +107,10 @@ export function Desk() {
               <p className="mt-2 text-sm text-muted">إن قال صاحب الرمز إنه لم يستلم، فأحِله إلى المشرف ولا تسلّمه.</p>
             </div>
           )}
-          <Button variant="secondary" className="self-start" onClick={reset}>امسح التالي</Button>
+          <div className="flex flex-wrap gap-3">
+            {retryable && <Button variant="secondary" disabled={redeem.isPending} onClick={() => redeem.mutate()}>{redeem.isPending ? 'جارٍ الإرسال…' : 'أعد الإرسال'}</Button>}
+            <Button variant="secondary" onClick={reset}>امسح التالي</Button>
+          </div>
         </div>
       )}
 

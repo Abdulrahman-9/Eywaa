@@ -9,7 +9,7 @@ import { VoucherDialog } from '../components/Voucher';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { cn } from '../lib/cn';
-import { formatAgo, formatDate, formatDateTime, formatDays, formatNumber } from '../lib/format';
+import { formatAgo, formatDate, formatDateTime, formatDays, formatNumber, digits } from '../lib/format';
 
 export interface Box {
   id: string; code: string; location: string; address: string | null; hostName: string | null; hostPhone: string | null; fundId: string; fund: string;
@@ -28,7 +28,7 @@ interface FundLite { id: string; name: string }
 interface UserLite { id: string; fullName: string }
 type Filter = 'active' | 'due' | 'retired';
 
-const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
+const int = (v: string) => Number(digits(v)) || 0;
 const monthName = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { month: 'short' });
 const monthFull = new Intl.DateTimeFormat('ar-IQ-u-nu-latn', { month: 'long', year: 'numeric' });
 const EMPTY = { code: '', location: '', address: '', hostName: '', hostPhone: '', fundId: '', agentId: '', installedOn: '', note: '' };
@@ -75,7 +75,9 @@ function BoxDialog({ id, canBook, agents, funds, onClose }: { id: string | null;
     if (!b) return;
     if (mode === 'collect') setC({ amount: '', by: b.agentId ?? '', direct: !b.agentId, sealNo: '', note: '' });
     if (mode === 'edit') setE({ code: b.code, location: b.location, address: b.address ?? '', hostName: b.hostName ?? '', hostPhone: b.hostPhone ?? '', fundId: b.fundId, agentId: b.agentId ?? '', installedOn: '', note: b.note ?? '' });
-  }, [mode, b]);
+    // يُملأ عند فتح النموذج، لا عند كل تحديث في الخلفية: وإلا مُحي المبلغ المعدود والمحاسب يكتبه.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, b?.id]);
   const refresh = () => { for (const key of ['boxes', 'agents', 'agent', 'accounting']) queryClient.invalidateQueries({ queryKey: [key] }); };
   const collect = useMutation({
     mutationFn: () => api<Collection>(`/boxes/${id}/collections`, { method: 'POST', body: { amount: int(c.amount), ...(c.direct ? { direct: true } : { collectedBy: c.by }), ...(c.sealNo.trim() ? { sealNo: c.sealNo.trim() } : {}), ...(c.note.trim() ? { note: c.note.trim() } : {}) } }),

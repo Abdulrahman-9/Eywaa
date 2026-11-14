@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AgentDonations } from '../components/AgentDonations';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ReasonDialog } from '../components/ReasonDialog';
 import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Skeleton } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatDate, formatDateTime, formatNumber } from '../lib/format';
+import { formatDate, formatDateTime, formatNumber, digits } from '../lib/format';
 
 interface Wh { id: string; name: string; pointId: string | null; main: boolean }
 interface Stock { warehouses: Wh[]; pendingMoves: number; items: { id: string; name: string; unit: string; byWarehouse: Record<string, number>; main: number; atPoints: number; nearestExpiry: string | null }[] }
@@ -15,7 +15,7 @@ type Kind = 'RECEIPT' | 'TRANSFER' | 'RETURN' | 'WASTE';
 export interface Reconcile { campaign: string; item: string | null; unit?: string; shortage?: number; points: { pointId: string; point: string; needed: number; sent: number; delivered: number; granted?: number; returned: number; remaining: number; shortage: number }[] }
 
 const KIND_AR = { RECEIPT: 'وارد', TRANSFER: 'تحويل', RETURN: 'راجع', WASTE: 'تالف', ADJUST: 'تسوية جرد' } as const;
-const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
+const int = (v: string) => Number(digits(v)) || 0;
 
 /** جدول المطابقة: ما خرج إلى النقطة = ما سُلِّم بالرموز + ما صُرف بالتخويل + ما رجع + ما بقي. */
 export function ReconcileTable({ data }: { data: Reconcile }) {
@@ -49,13 +49,19 @@ function MoveDialog({ kind, stock, onClose }: { kind: Kind | null; stock: Stock;
   const queryClient = useQueryClient();
   const main = stock.warehouses.find((w) => w.main)!;
   const pointWhs = stock.warehouses.filter((w) => !w.main);
-  const [form, setForm] = useState({ itemId: '', other: '', quantity: '', expiry: '', source: '', note: '' });
+  const [form, setForm] = useState({ itemId: '', other: '', quantity: '', expiry: '', source: '', note: '', campaignId: '' });
+  // التحويل إلى النقطة والراجع منها يُنسبان إلى حملتهما: بغير ذلك لا تراهما مطابقة الحملة، فتُظهر «أُرسل 0» والبضاعة في النقطة.
+  const campaigns = useQuery({ queryKey: ['campaigns'], queryFn: () => api<{ id: string; name: string; status: string; itemId: string | null }[]>('/campaigns'), enabled: kind === 'TRANSFER' || kind === 'RETURN' });
+  const forItem = (campaigns.data ?? []).filter((c) => c.status === 'ACTIVE' && c.itemId === form.itemId);
+  // حملة واحدة جارية على هذا الصنف: تُختار سلفاً، ويبدّلها أمين المخزن إن أراد.
+  useEffect(() => { setForm((f) => ({ ...f, campaignId: forItem.length === 1 ? forItem[0].id : forItem.some((c) => c.id === f.campaignId) ? f.campaignId : '' })); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.itemId, campaigns.data, kind]);
   const save = useMutation({
     mutationFn: () => {
       const body: Record<string, unknown> = { kind, itemId: form.itemId, quantity: int(form.quantity), note: form.note.trim() || undefined };
       if (kind === 'RECEIPT') Object.assign(body, { toWarehouseId: main.id, expiry: form.expiry || undefined, source: form.source.trim() || undefined });
-      if (kind === 'TRANSFER') Object.assign(body, { fromWarehouseId: main.id, toWarehouseId: form.other });
-      if (kind === 'RETURN') Object.assign(body, { fromWarehouseId: form.other, toWarehouseId: main.id });
+      if (kind === 'TRANSFER') Object.assign(body, { fromWarehouseId: main.id, toWarehouseId: form.other, campaignId: form.campaignId || undefined });
+      if (kind === 'RETURN') Object.assign(body, { fromWarehouseId: form.other, toWarehouseId: main.id, campaignId: form.campaignId || undefined });
       if (kind === 'WASTE') Object.assign(body, { fromWarehouseId: form.other || main.id });
       return api<{ status: string }>('/inventory/moves', { method: 'POST', body });
     },
@@ -63,7 +69,8 @@ function MoveDialog({ kind, stock, onClose }: { kind: Kind | null; stock: Stock;
       toast(r.status === 'PENDING' ? 'سُجّل التالف وينتظر اعتماد موظف آخر' : 'سُجّلت الحركة');
       queryClient.invalidateQueries({ queryKey: ['stock'] });
       queryClient.invalidateQueries({ queryKey: ['stock-moves'] });
-      setForm({ itemId: '', other: '', quantity: '', expiry: '', source: '', note: '' });
+      setForm({ itemId: '', other: '', quantity: '', expiry: '', source: '', note: '', campaignId: '' });
+      queryClient.invalidateQueries({ queryKey: ['campaign'] });
       onClose();
     },
   });
@@ -76,6 +83,11 @@ function MoveDialog({ kind, stock, onClose }: { kind: Kind | null; stock: Stock;
       {(needsOther || kind === 'WASTE') && (
         <Field label={kind === 'TRANSFER' ? 'إلى مخزن النقطة' : kind === 'RETURN' ? 'من مخزن النقطة' : 'من مخزن'}>
           {(id) => <Select id={id} value={form.other} onChange={(e) => setForm({ ...form, other: e.target.value })}>{kind === 'WASTE' ? <option value="">المخزن الرئيس</option> : <option value="">اختر</option>}{pointWhs.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>}
+        </Field>
+      )}
+      {needsOther && forItem.length > 0 && (
+        <Field label="للحملة" hint="به يُحسب في مطابقة مخزون الحملة. اتركه «بلا حملة» إن كان تزويداً عاماً للنقطة.">
+          {(id) => <Select id={id} value={form.campaignId} onChange={(e) => setForm({ ...form, campaignId: e.target.value })}><option value="">بلا حملة</option>{forItem.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>}
         </Field>
       )}
       <Field label="الكمية">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />}</Field>

@@ -124,9 +124,10 @@ export function Users() {
   const users = useQuery({ queryKey: ['users'], queryFn: () => api<UserRow[]>('/users') });
   const update = useMutation({
     mutationFn: (v: { id: string; body: { active?: boolean; role?: Role; password?: string; resetAccess?: true } }) => api(`/users/${v.id}`, { method: 'PATCH', body: v.body }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
-    onSettled: () => { setConfirm(null); setResetting(null); setTemp(''); },
+    // النوافذ تُغلق عند النجاح وحده: لو أُغلقت عند الإخفاق لظنّ المدير أن الكلمة وُضعت أو الحساب عُطّل وهو لم يكن.
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['users'] }); setConfirm(null); setResetting(null); setRoleChange(null); setTemp(''); },
   });
+  const [roleChange, setRoleChange] = useState<{ user: UserRow; role: Role } | null>(null);
 
   return (
     <>
@@ -135,7 +136,7 @@ export function Users() {
         description="حسابات الموظفين وأدوارهم. تعطيل الحساب يسري فوراً ولو كان صاحبه داخلاً."
         action={<Button onClick={() => setCreating(true)}>إضافة مستخدم</Button>}
       />
-      {(users.error || update.error) && <Alert>{(users.error ?? update.error)!.message}</Alert>}
+      {(users.error || (update.error && !roleChange && !resetting && !confirm)) && <Alert>{(users.error ?? update.error)!.message}</Alert>}
       <Card className="p-0">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[44rem] border-collapse">
@@ -161,7 +162,7 @@ export function Users() {
                         className="max-w-48"
                         value={u.role}
                         disabled={update.isPending}
-                        onChange={(e) => update.mutate({ id: u.id, body: { role: e.target.value as Role } })}
+                        onChange={(e) => { update.reset(); setRoleChange({ user: u, role: e.target.value as Role }); }}
                       >
                         {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                       </Select>
@@ -172,8 +173,8 @@ export function Users() {
                   <td className="px-4 py-2 text-end">
                     {u.id === me?.id ? <span className="text-sm text-muted">حسابك</span> : (
                       <div className="flex flex-wrap justify-end gap-2">
-                        <Button variant="secondary" onClick={() => setResetting(u)}>كلمة المرور والدخول</Button>
-                        {u.active ? <Button variant="danger" onClick={() => setConfirm(u)}>تعطيل</Button>
+                        <Button variant="secondary" onClick={() => { update.reset(); setResetting(u); }}>كلمة المرور والدخول</Button>
+                        {u.active ? <Button variant="danger" onClick={() => { update.reset(); setConfirm(u); }}>تعطيل</Button>
                           : <Button variant="secondary" onClick={() => update.mutate({ id: u.id, body: { active: true } })}>تفعيل</Button>}
                       </div>
                     )}
@@ -187,7 +188,16 @@ export function Users() {
 
       <CreateUserDialog open={creating} onClose={() => setCreating(false)} />
       <Devices />
+      <Dialog open={!!roleChange} title="تغيير الدور" onClose={() => setRoleChange(null)}>
+        {update.error && <Alert>{update.error.message}</Alert>}
+        <p>يصير <strong>{roleChange?.user.fullName}</strong> «{roleChange ? ROLE_LABEL[roleChange.role] : ''}» بدل «{roleChange ? ROLE_LABEL[roleChange.user.role] : ''}». تتبدّل صلاحياته فوراً، وهو داخلٌ أو خارج.</p>
+        <div className="flex flex-wrap justify-end gap-3">
+          <Button variant="secondary" onClick={() => setRoleChange(null)}>إلغاء</Button>
+          <Button disabled={update.isPending} onClick={() => roleChange && update.mutate({ id: roleChange.user.id, body: { role: roleChange.role } })}>غيّر الدور</Button>
+        </div>
+      </Dialog>
       <Dialog open={!!resetting} title={`كلمة المرور والدخول: ${resetting?.fullName ?? ''}`} onClose={() => { setResetting(null); setTemp(''); }}>
+        {update.error && <Alert>{update.error.message}</Alert>}
         <Field label="كلمة مرور مؤقتة" hint="12 خانة على الأقل. يُلزم صاحبها بتغييرها عند أول دخول.">
           {(id) => <Input id={id} dir="ltr" autoComplete="off" value={temp} onChange={(e) => setTemp(e.target.value)} />}
         </Field>
@@ -198,6 +208,7 @@ export function Users() {
         </div>
       </Dialog>
       <Dialog open={!!confirm} title="تعطيل الحساب" onClose={() => setConfirm(null)}>
+        {update.error && <Alert>{update.error.message}</Alert>}
         <p>سيُمنع <strong>{confirm?.fullName}</strong> من الدخول فوراً، وتُقطع جلسته إن كان داخلاً. ولا يُحذف شيء مما عمله.</p>
         <div className="flex flex-wrap justify-end gap-3">
           <Button variant="secondary" onClick={() => setConfirm(null)}>إلغاء</Button>

@@ -7,7 +7,7 @@ import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Chip, CountUp, Field, Input, Segmented, Select, Skeleton, Stepper, type StepInfo } from '../components/ui';
 import { api } from '../lib/api';
 import { CLASS_LETTER, ORDER_AR, PICKED_AR, describeSelection, type Order, type Selection } from '../lib/campaign';
-import { formatDate, formatNumber } from '../lib/format';
+import { formatDate, formatNumber, digits } from '../lib/format';
 import { TAGS } from '../lib/labels';
 import type { Point } from './Campaigns';
 import type { Fund } from './Cashbox';
@@ -57,7 +57,7 @@ const fromCampaign = (c: CampaignDetail): Draft => {
     scope: s.maxBenefits?.scope ?? s.notSinceDays?.scope ?? 'PROGRAM', include: s.include ?? [], nominated: s.nominated ?? [], exclude: s.exclude ?? [],
   };
 };
-const num = (v: string) => (v.trim() === '' ? undefined : Number(v.replace(/\D/g, '')) || 0);
+const num = (v: string) => (v.trim() === '' ? undefined : Number(digits(v)) || 0);
 const toSelection = (d: Draft): Selection => {
   const s: Selection = { order: d.order, include: d.include, nominated: d.nominated, exclude: d.exclude, manualOnly: d.manualOnly };
   if (d.classes.length) s.classes = d.classes;
@@ -151,17 +151,18 @@ function Wizard({ campaign }: { campaign?: CampaignDetail }) {
     setD((x) => {
       const n = { ...x };
       for (const [k, v] of Object.entries(patch)) {
-        if (k === 'minPoints' || k === 'membersMin' || k === 'membersMax') n[k] = String(v);
-        else if (k === 'classes' || k === 'mahallas' || k === 'tagsAny') n[k] = (v as string[] | undefined) ?? [];
-        else if (k === 'registeredFrom' || k === 'registeredTo') n[k] = (v as string | undefined) ?? '';
-        else if (k === 'maxBenefits') n.benefitCount = String((v as { count: number }).count);
-        else if (k === 'notSinceDays') n.sinceDays = String((v as { days: number }).days);
+        // null: الاقتراح يمسح الشرط كله.
+        if (k === 'minPoints' || k === 'membersMin' || k === 'membersMax') n[k] = v == null ? '' : String(v);
+        else if (k === 'classes' || k === 'mahallas' || k === 'tagsAny') n[k] = (v as string[] | null | undefined) ?? [];
+        else if (k === 'registeredFrom' || k === 'registeredTo') n[k] = (v as string | null | undefined) ?? '';
+        else if (k === 'maxBenefits') n.benefitCount = v == null ? '' : String((v as { count: number }).count);
+        else if (k === 'notSinceDays') n.sinceDays = v == null ? '' : String((v as { days: number }).days);
       }
       return n;
     });
     toast(`عُدّلت القاعدة: ${label}`, 'info');
   };
-  const addManual = () => { const no = addNo.replace(/\D/g, ''); if (no.length >= 5 && !d.include.includes(no)) set({ include: [...d.include, no], exclude: d.exclude.filter((x) => x !== no) }); setAddNo(''); };
+  const addManual = () => { const no = digits(addNo); if (no.length >= 5 && !d.include.includes(no)) set({ include: [...d.include, no], exclude: d.exclude.filter((x) => x !== no) }); setAddNo(''); };
   const dropRow = (x: Row) => (x.pickedBy === 'MANUAL' ? set({ include: d.include.filter((n) => n !== x.familyNo) }) : x.pickedBy === 'NOMINATED' ? set({ nominated: d.nominated.filter((n) => n !== x.familyNo) }) : set({ exclude: [...d.exclude, x.familyNo] }));
 
   // ما يلزم كل صفحة لتُتجاوز. لا يُتقدَّم إلى صفحة قبل أن تصحّ التي قبلها.
@@ -354,7 +355,7 @@ function Wizard({ campaign }: { campaign?: CampaignDetail }) {
               <Card className="flex flex-col gap-4">
                 <div className="flex max-w-xl flex-wrap items-end gap-2">
                   <div className="min-w-48 flex-1"><Field label="أضف عائلة برقمها" hint={d.manualOnly ? undefined : 'تدخل فوق العدد والقواعد، ما دامت تستحق البرنامج.'}>{(id) => <Input id={id} inputMode="numeric" dir="ltr" value={addNo} onChange={(e) => setAddNo(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addManual(); } }} />}</Field></div>
-                  <Button variant="secondary" disabled={addNo.replace(/\D/g, '').length < 5} onClick={addManual}><UserPlus aria-hidden="true" className="size-4" />أضف العائلة</Button>
+                  <Button variant="secondary" disabled={digits(addNo).length < 5} onClick={addManual}><UserPlus aria-hidden="true" className="size-4" />أضف العائلة</Button>
                 </div>
                 {p.rejected.length > 0 && (
                   <Alert>

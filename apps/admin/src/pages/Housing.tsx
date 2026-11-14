@@ -6,7 +6,7 @@ import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Skeleton } from '../components/ui';
 import { api, upload } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatDate, formatDateTime, formatNumber } from '../lib/format';
+import { formatDate, formatDateTime, formatNumber, digits } from '../lib/format';
 import type { FamilyRow } from '../lib/types';
 import type { Fund } from './Cashbox';
 
@@ -18,7 +18,7 @@ interface Contractor { id: string; name: string; activeProjects: number; deliver
 
 const STATUS = { PENDING_APPROVAL: ['ينتظر الاعتماد', 'warn'], ACTIVE: ['جارٍ', 'ok'], DELIVERED: ['مُسلَّم', 'neutral'], CANCELLED: ['ملغى', 'danger'], REJECTED: ['مرفوض', 'danger'] } as const;
 const STAGE = { PLANNED: ['لم تبدأ', 'neutral'], CLAIMED: ['تنتظر زيارة تحقق', 'warn'], VERIFIED: ['تنتظر اعتماد الصرف', 'info'], PAID: ['معتمدة ومصروفة', 'ok'] } as const;
-const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
+const int = (v: string) => Number(digits(v)) || 0;
 const DEFAULT_STAGES = [{ name: 'الأساس', amount: '' }, { name: 'الهيكل والسقف', amount: '' }, { name: 'التشطيب', amount: '' }, { name: 'التسليم', amount: '' }];
 
 function NewProject({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -51,10 +51,10 @@ function NewProject({ open, onClose }: { open: boolean; onClose: () => void }) {
         {(id) => <Input id={id} dir="ltr" inputMode="numeric" value={familyNo} onChange={(e) => setFamilyNo(e.target.value.trim())} />}
       </Field>
       <Field label="موقع البناء">{(id) => <Input id={id} value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />}</Field>
-      <Field label="المتعهد">{(id) => <Select id={id} value={form.contractorId} onChange={(e) => setForm({ ...form, contractorId: e.target.value })}><option value="">اختر المتعهد</option>{contractors.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>}</Field>
+      <Field label="المقاول">{(id) => <Select id={id} value={form.contractorId} onChange={(e) => setForm({ ...form, contractorId: e.target.value })}><option value="">اختر المقاول</option>{contractors.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>}</Field>
       <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-40 flex-1"><Field label="متعهد جديد">{(id) => <Input id={id} value={form.newContractor} onChange={(e) => setForm({ ...form, newContractor: e.target.value })} />}</Field></div>
-        <Button variant="secondary" disabled={form.newContractor.trim().length < 3 || addContractor.isPending} onClick={() => addContractor.mutate()}>أضف المتعهد</Button>
+        <div className="min-w-40 flex-1"><Field label="مقاول جديد">{(id) => <Input id={id} value={form.newContractor} onChange={(e) => setForm({ ...form, newContractor: e.target.value })} />}</Field></div>
+        <Button variant="secondary" disabled={form.newContractor.trim().length < 3 || addContractor.isPending} onClick={() => addContractor.mutate()}>أضف المقاول</Button>
       </div>
       <Field label="يُصرف من صندوق">{(id) => <Select id={id} value={form.fundId} onChange={(e) => setForm({ ...form, fundId: e.target.value })}><option value="">اختر الصندوق</option>{funds.data?.funds.filter((f) => !f.programId).map((f) => <option key={f.id} value={f.id}>{f.name} (المتاح {formatNumber(f.available)})</option>)}</Select>}</Field>
       <div className="grid grid-cols-2 gap-3">
@@ -86,7 +86,7 @@ export function Housing() {
   const canManage = user?.role === 'ADMIN' || user?.role === 'PROJECT_SUPERVISOR';
   return (
     <>
-      <PageHeader title="بناء المنازل" description="لكل منزل متعهد وميزانية ومراحل. لا تُصرف دفعة مرحلة إلا بعد زيارة تحقق واعتماد موظف آخر."
+      <PageHeader title="بناء المنازل" description="لكل منزل مقاول وميزانية ومراحل. لا تُصرف دفعة مرحلة إلا بعد زيارة تحقق واعتماد موظف آخر."
         action={canManage && <Button onClick={() => setCreating(true)}>مشروع جديد</Button>} />
       {list.error && <Alert>{list.error.message}</Alert>}
       {list.isPending && <Skeleton className="h-24 w-full" />}
@@ -96,7 +96,7 @@ export function Housing() {
           <Link key={p.id} to={`/housing/${p.id}`} className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-line bg-surface p-5 hover:border-brand">
             <div className="min-w-0 flex-[1_1_18rem]">
               <div className="flex flex-wrap items-center gap-2"><strong className="text-lg">منزل العائلة {p.familyNo}</strong><Badge tone={STATUS[p.status][1]}>{STATUS[p.status][0]}</Badge>{p.waiting > 0 && <Badge tone="warn">مرحلة تنتظر</Badge>}</div>
-              <span className="text-sm text-muted">{p.headName} · {p.location} · المتعهد {p.contractor}</span>
+              <span className="text-sm text-muted">{p.headName} · {p.location} · المقاول {p.contractor}</span>
             </div>
             <div className="min-w-48 flex-1">
               <div className="mb-1 flex justify-between text-sm"><span>صُرف {formatNumber(p.paid)} من {formatNumber(p.budget)}</span><span>{Math.round((p.paid / p.budget) * 100)}%</span></div>
@@ -140,9 +140,9 @@ export function HousingProject() {
   const canApprove = isSupervisor || user?.role === 'ACCOUNTANT';
   const firstOpen = p.stages.find((s) => s.status !== 'PAID');
   const NOTE = {
-    claim: ['طلب المتعهد صرف الدفعة', 'سجّل الطلب', 'ما قاله المتعهد وما رفعه من صور', 'سُجّل طلب المتعهد'],
+    claim: ['طلب المقاول صرف الدفعة', 'سجّل الطلب', 'ما قاله المقاول وما رفعه من صور', 'سُجّل طلب المقاول'],
     verify: ['زيارة التحقق', 'سجّل زيارة التحقق', 'ما رأيتَه في الموقع', 'سُجّلت زيارة التحقق'],
-    'send-back': ['إعادة المرحلة إلى المتعهد', 'أعِد إلى المتعهد', 'ما الذي لم يتمّ', 'أُعيدت المرحلة إلى المتعهد'],
+    'send-back': ['إعادة المرحلة إلى المقاول', 'أعِد إلى المقاول', 'ما الذي لم يتمّ', 'أُعيدت المرحلة إلى المقاول'],
   } as const;
 
   return (
@@ -180,9 +180,9 @@ export function HousingProject() {
                 {current && (
                   <div className="mt-1 flex flex-wrap gap-2">
                     {isSupervisor && <Button variant="secondary" disabled={photo.isPending} onClick={() => { setPhotoStage(s.id); fileRef.current?.click(); }}>أرفق صورة</Button>}
-                    {isSupervisor && s.status === 'PLANNED' && <Button onClick={() => setNoting({ stage: s, verb: 'claim' })}>طلب المتعهد صرفها</Button>}
+                    {isSupervisor && s.status === 'PLANNED' && <Button onClick={() => setNoting({ stage: s, verb: 'claim' })}>طلب المقاول صرفها</Button>}
                     {isSupervisor && s.status === 'CLAIMED' && <Button onClick={() => setNoting({ stage: s, verb: 'verify' })}>سجّل زيارة التحقق</Button>}
-                    {isSupervisor && (s.status === 'CLAIMED' || s.status === 'VERIFIED') && <Button variant="danger" onClick={() => setNoting({ stage: s, verb: 'send-back' })}>أعِد إلى المتعهد</Button>}
+                    {isSupervisor && (s.status === 'CLAIMED' || s.status === 'VERIFIED') && <Button variant="danger" onClick={() => setNoting({ stage: s, verb: 'send-back' })}>أعِد إلى المقاول</Button>}
                     {canApprove && s.status === 'VERIFIED' && s.verifiedBy !== user?.username && <Button onClick={() => setPaying(s)}>اعتمد واصرف الدفعة</Button>}
                   </div>
                 )}
@@ -195,7 +195,7 @@ export function HousingProject() {
       </Card>
 
       <Card className="flex max-w-xl flex-col gap-1.5">
-        <h2 className="text-lg font-bold">المتعهد والعقد</h2>
+        <h2 className="text-lg font-bold">المقاول والعقد</h2>
         <strong>{p.contractor}</strong>
         {p.contractorPhone && <div><span className="text-muted">الهاتف: </span><span dir="ltr">{p.contractorPhone}</span></div>}
         <div><span className="text-muted">العقد: </span>{formatDate(p.contractDate)}، مدته {p.durationDays} يوماً</div>
@@ -210,7 +210,7 @@ export function HousingProject() {
         {noting && <p className="text-muted">{NOTE[noting.verb][2]}.</p>}
       </ReasonDialog>
       <Dialog open={paying !== null} title="اعتماد المرحلة وصرف دفعتها" onClose={() => { act.reset(); setPaying(null); }}>
-        {paying && <p>ستُصرف <strong>{formatNumber(paying.amount)} دينار</strong> للمتعهد {p.contractor} عن مرحلة «{paying.name}»، من «{p.fund}». تحقق منها {paying.verifiedBy}: {paying.verifyNote}.</p>}
+        {paying && <p>ستُصرف <strong>{formatNumber(paying.amount)} دينار</strong> للمقاول {p.contractor} عن مرحلة «{paying.name}»، من «{p.fund}». تحقق منها {paying.verifiedBy}: {paying.verifyNote}.</p>}
         {act.error && <Alert>{act.error.message}</Alert>}
         <div className="flex flex-wrap justify-end gap-3">
           <Button variant="secondary" onClick={() => setPaying(null)}>إلغاء</Button>

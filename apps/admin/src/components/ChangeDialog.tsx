@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { digits } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { CHANGE_TYPES, HOUSING, INCOME_KINDS, RELATIONS, type ChangeType, type Housing, type IncomeKind, type Relation } from '../lib/labels';
@@ -59,7 +60,7 @@ export function ChangeDialog({ family, open, onClose }: { family: Family; open: 
         return Object.keys(p).length ? p : null;
       }
       case 'SET_INCOMES':
-        return { incomes: incomes.filter((i) => i.amount.trim()).map((i) => ({ kind: i.kind, amountIqd: Number(i.amount.replace(/\D/g, '')) })) };
+        return { incomes: incomes.filter((i) => i.amount.trim()).map((i) => ({ kind: i.kind, amountIqd: Number(digits(i.amount)) })) };
       case 'UPDATE_MEMBER':
         return personId ? {
           personId, status: member.deceased ? 'DECEASED' : 'ACTIVE', isOrphan: member.isOrphan,

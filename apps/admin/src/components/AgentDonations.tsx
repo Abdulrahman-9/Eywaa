@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatDateTime, formatNumber } from '../lib/format';
+import { formatDateTime, formatNumber, digits } from '../lib/format';
 import { ReasonDialog } from './ReasonDialog';
 import { useToast } from './toast';
 import { Alert, Badge, Button, Dialog, Field, Input, Select } from './ui';
@@ -38,7 +38,9 @@ export function AgentDonations({ agentId, pendingOnly, rows }: { agentId?: strin
   const [f, setF] = useState({ itemId: '', warehouseId: '', quantity: '', expiry: '', note: '' });
   useEffect(() => {
     if (receiving) setF({ itemId: '', warehouseId: stock.data?.warehouses.find((w) => w.main)?.id ?? '', quantity: String(receiving.quantity ?? ''), expiry: '', note: '' });
-  }, [receiving, stock.data]);
+    // يُملأ عند فتح النافذة، لا عند كل تحديث للمخزون في الخلفية.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiving]);
   const refresh = () => { for (const key of ['agent-donations', 'agents', 'agent', 'stock', 'stock-moves']) queryClient.invalidateQueries({ queryKey: [key] }); };
   const receive = useMutation({
     mutationFn: () => api(`/agent-donations/${receiving!.id}/receive`, { method: 'POST', body: { itemId: f.itemId, warehouseId: f.warehouseId, quantity: Number(f.quantity), ...(f.expiry ? { expiry: f.expiry } : {}), ...(f.note.trim() ? { note: f.note.trim() } : {}) } }),
@@ -92,7 +94,7 @@ export function AgentDonations({ agentId, pendingOnly, rows }: { agentId?: strin
             </Field>
             <Field label="يدخل إلى">{(id) => <Select id={id} value={f.warehouseId} onChange={(e) => setF({ ...f, warehouseId: e.target.value })}>{stock.data?.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>}</Field>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="الكمية المستلَمة">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={f.quantity} onChange={(e) => setF({ ...f, quantity: e.target.value.replace(/\D/g, '') })} />}</Field>
+              <Field label="الكمية المستلَمة">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={f.quantity} onChange={(e) => setF({ ...f, quantity: digits(e.target.value) })} />}</Field>
               <Field label="الصلاحية (إن وُجدت)">{(id) => <Input id={id} type="date" value={f.expiry} onChange={(e) => setF({ ...f, expiry: e.target.value })} />}</Field>
             </div>
             <Field label={differs ? 'سبب الفرق (لازم)' : 'ملاحظة'} error={differs && !f.note.trim() ? `المبلَّغ ${receiving.quantity} والمستلَم ${f.quantity || 0}` : undefined}>

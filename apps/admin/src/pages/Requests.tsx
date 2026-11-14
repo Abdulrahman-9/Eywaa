@@ -6,7 +6,7 @@ import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, Skeleton } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatDateTime } from '../lib/format';
+import { formatDateTime, digits } from '../lib/format';
 
 interface Match { families: { familyId: string; familyNo: string; name: string; score: number; samePhone: boolean }[]; requests: { id: string; no: number; name: string; score: number; samePhone: boolean }[] }
 interface Quick {
@@ -120,7 +120,7 @@ export function Requests() {
         <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
           <Field label="الهاتف (اختياري)">{(id) => <Input id={id} dir="ltr" inputMode="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />}</Field>
           <Field label="المحلة (اختيارية)">{(id) => <Input id={id} value={form.mahalla} onChange={(e) => setForm({ ...form, mahalla: e.target.value })} />}</Field>
-          <Field label="عدد الأفراد (اختياري)">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={form.membersCount} onChange={(e) => setForm({ ...form, membersCount: e.target.value.replace(/\D/g, '') })} />}</Field>
+          <Field label="عدد الأفراد (اختياري)">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={form.membersCount} onChange={(e) => setForm({ ...form, membersCount: digits(e.target.value) })} />}</Field>
         </div>
         <Field label="ملاحظة (اختيارية)">{(id) => <Input id={id} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />}</Field>
         <div className="flex flex-wrap justify-end gap-3">

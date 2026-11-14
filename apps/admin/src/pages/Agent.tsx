@@ -9,7 +9,7 @@ import { KIND_AR, VoucherDialog } from '../components/Voucher';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { cn } from '../lib/cn';
-import { formatAgo, formatDate, formatDateTime, formatDays, formatNumber } from '../lib/format';
+import { formatAgo, formatDate, formatDateTime, formatDays, formatNumber, digits } from '../lib/format';
 import { initials, type AgentRow } from './Agents';
 import type { Box, Collection } from './Boxes';
 
@@ -30,7 +30,7 @@ type Tab = 'activity' | 'cash' | 'goods' | 'boxes' | 'donations' | 'work';
 
 const QUICK_AR: Record<string, string> = { NEW: 'جديد', INVITED: 'دُعي صاحبه', VISIT_ASSIGNED: 'أُسندت زيارته', COMPLETED: 'سُجّلت العائلة', DISMISSED: 'صُرف النظر عنه' };
 const EDIT_AR: Record<string, string> = { OPEN: 'ينتظر زيارة', VISITED: 'زيرت وتنتظر الاعتماد', CLOSED: 'أُغلق', CANCELLED: 'أُلغي' };
-const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
+const int = (v: string) => Number(digits(v)) || 0;
 const H = ({ cols }: { cols: string[] }) => <thead><tr className="text-muted">{cols.map((h) => <th key={h} scope="col" className="border-b border-line p-2 text-start font-medium">{h}</th>)}</tr></thead>;
 
 export function Agent() {
@@ -48,11 +48,14 @@ export function Agent() {
   const [r, setR] = useState({ fundId: '', amount: '', note: '' });
   const [p, setP] = useState({ fullName: '', phone: '' });
   const a = q.data;
-  useEffect(() => { if (receiving && a) { const f = a.custodyStatement.funds[0]; setR({ fundId: f?.fundId ?? '', amount: f ? String(f.balance) : '', note: '' }); } }, [receiving, a]);
-  useEffect(() => { if (editing && a) setP({ fullName: a.fullName, phone: a.phone ?? '' }); }, [editing, a]);
+  // النموذج يُملأ عند فتح النافذة لا عند كل تحديث في الخلفية: لو أُعيد ملؤه لمحا التحديثُ المبلغَ الذي كتبه المحاسب وأعاد الذمة كلها.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (receiving && a) { const f = a.custodyStatement.funds[0]; setR({ fundId: f?.fundId ?? '', amount: f ? String(f.balance) : '', note: '' }); } }, [receiving]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (editing && a) setP({ fullName: a.fullName, phone: a.phone ?? '' }); }, [editing]);
   const refresh = () => { for (const key of ['agent', 'agents', 'accounting']) queryClient.invalidateQueries({ queryKey: [key] }); };
   const receive = useMutation({
-    mutationFn: () => api<{ id: string; no: string; remaining: number }>('/accounting/custody/receive', { method: 'POST', body: { fundId: r.fundId, userId: id, amount: int(r.amount), ...(r.note.trim() ? { note: r.note.trim() } : {}) } }),
+    mutationFn: () => api<{ id: string; no: string; remaining: number }>('/accounting/custody/receive', { method: 'POST', body: { fundId: r.fundId, userId: id, amount: int(r.amount), expectedBook: a?.custodyStatement.funds.find((f) => f.fundId === r.fundId)?.balance, ...(r.note.trim() ? { note: r.note.trim() } : {}) } }),
     onSuccess: (e) => { toast(`استُلم ${formatNumber(int(r.amount))} بالقيد ${e.no}. بقي في ذمته ${formatNumber(e.remaining)}`); setReceiving(false); refresh(); setVoucher(e.id); },
   });
   const save = useMutation({

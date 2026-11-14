@@ -16,7 +16,7 @@ run(async ({ step, shot, newPage }) => {
   const sup = await newPage();
   const acc = await newPage();
 
-  await step('مشرف المشاريع ينشئ المشروع بمتعهده ومراحله', async () => {
+  await step('مشرف المشاريع ينشئ المشروع بمقاوله ومراحله', async () => {
     await login(sup, names.projects);
     await sup.getByRole('link', { name: 'بناء المنازل' }).click();
     await sup.getByRole('button', { name: 'مشروع جديد' }).click();
@@ -24,9 +24,9 @@ run(async ({ step, shot, newPage }) => {
     await d.getByLabel('رقم العائلة').fill(fam.familyNo);
     await d.getByText('آمنة يوسف صالح العلواني').waitFor();
     await d.getByLabel('موقع البناء').fill('النزال، قرب الجامع');
-    await d.getByLabel('متعهد جديد').fill('جاسم محمد خلف الجميلي');
-    await d.getByRole('button', { name: 'أضف المتعهد' }).click();
-    await d.getByLabel('المتعهد', { exact: true }).locator('option', { hasText: 'جاسم محمد' }).waitFor({ state: 'attached' });
+    await d.getByLabel('مقاول جديد').fill('جاسم محمد خلف الجميلي');
+    await d.getByRole('button', { name: 'أضف المقاول' }).click();
+    await d.getByLabel('المقاول', { exact: true }).locator('option', { hasText: 'جاسم محمد' }).waitFor({ state: 'attached' });
     await d.getByLabel('يُصرف من صندوق').selectOption({ label: 'صندوق بناء المنازل (المتاح 30,000,000)' });
     for (const [i, amount] of ['6000000', '12000000', '4800000', '1200000'].entries()) await d.getByLabel(`دفعة المرحلة ${i + 1}`).fill(amount);
     await d.getByText('24,000,000').waitFor();
@@ -46,9 +46,9 @@ run(async ({ step, shot, newPage }) => {
 
   await step('لا زرّ صرف قبل زيارة التحقق، والتنبيه ظاهر', async () => {
     await sup.reload();
-    await sup.getByRole('button', { name: 'طلب المتعهد صرفها' }).click();
+    await sup.getByRole('button', { name: 'طلب المقاول صرفها' }).click();
     let d = sup.getByRole('dialog');
-    await d.getByLabel('السبب (لازم)').fill('قال المتعهد إن الأساس تمّ ورفع صوره');
+    await d.getByLabel('السبب (لازم)').fill('قال المقاول إن الأساس تمّ ورفع صوره');
     await d.getByRole('button', { name: 'سجّل الطلب' }).click();
     await sup.getByText('لا تُصرف دفعة مرحلة لم تُسجَّل لها زيارة تحقق').waitFor();
     await acc.reload();

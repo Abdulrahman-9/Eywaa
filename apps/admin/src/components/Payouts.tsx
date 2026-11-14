@@ -111,7 +111,8 @@ function NewPayout({ campaignId, onClose, onDone }: { campaignId: string; onClos
   const payable = (candidates.data ?? []).filter((c) => c.phone);
   const noPhone = (candidates.data?.length ?? 0) - payable.length;
   // لا يُختار أحد سلفاً: من يُحوَّل له يُعيَّن بالاسم، فلا يدخل الكشفَ من سيحضر إلى النقطة.
-  useEffect(() => { setPicked(new Set()); }, [candidates.data]);
+  // عند تحديث القائمة في الخلفية يبقى ما اختاره المحاسب، ويسقط منه من خرج من القائمة فقط (استلم في الأثناء).
+  useEffect(() => { setPicked((old) => new Set([...old].filter((id) => candidates.data?.some((c) => c.entitlementId === id && c.phone)))); }, [candidates.data]);
   const total = payable.filter((c) => picked.has(c.entitlementId)).reduce((s, c) => s + c.amount, 0);
   const create = useMutation({
     mutationFn: () => api<Batch>('/payouts', { method: 'POST', body: { campaignId, method, provider: provider.trim(), entitlementIds: [...picked] } }),

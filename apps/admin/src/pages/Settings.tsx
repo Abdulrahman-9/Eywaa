@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { Alert, Button, Card, Dialog, Field, Input, PageHeader, Skeleton } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatDateTime, formatNumber } from '../lib/format';
+import { formatDateTime, formatNumber, digits } from '../lib/format';
 
 interface Setting {
   key: string;
@@ -93,7 +93,7 @@ export function Settings() {
           <form onSubmit={(e) => { e.preventDefault(); if (Number.isInteger(nextCap)) saveCap.mutate(nextCap); }} className="flex flex-wrap items-end gap-3 border-t border-line pt-4">
             <div className="min-w-48 flex-1">
               <Field label="الحدّ الجديد بالنقاط" hint="من 0 (يُعطَّل الرفع والخفض) إلى 50">
-                {(id) => <Input id={id} dir="ltr" inputMode="numeric" placeholder="10" value={capDraft} onChange={(e) => setCapDraft(e.target.value.replace(/\D/g, ''))} />}
+                {(id) => <Input id={id} dir="ltr" inputMode="numeric" placeholder="10" value={capDraft} onChange={(e) => setCapDraft(digits(e.target.value))} />}
               </Field>
             </div>
             <Button type="submit" disabled={!Number.isInteger(nextCap) || nextCap > 50 || nextCap === cap?.value || saveCap.isPending}>غيّر الحدّ</Button>

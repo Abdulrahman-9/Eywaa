@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { digits } from '../lib/format';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { DOC_TYPES, type DocType } from '../lib/labels';
@@ -8,8 +9,7 @@ export interface DocDraft { type: DocType; number: string; register?: string; pa
 
 /** الوثيقة مكتملة الحقول اللازمة لنوعها. */
 export function isDocComplete(d: DocDraft): boolean {
-  const digits = d.number.replace(/\D/g, '');
-  if (d.type === 'NATIONAL_CARD') return digits.length === 12;
+  if (d.type === 'NATIONAL_CARD') return digits(d.number).length === 12;
   if (d.type === 'CIVIL_ID') return !!d.number.trim() && !!d.register?.trim() && !!d.page?.trim();
   return !!d.number.trim() && !!d.portfolio?.trim();
 }

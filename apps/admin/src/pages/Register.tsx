@@ -6,7 +6,7 @@ import { DocumentFields, isDocComplete, type DocDraft } from '../components/Docu
 import { useToast } from '../components/toast';
 import { Alert, Button, Card, Field, Input, PageHeader, Select } from '../components/ui';
 import { api, ApiError } from '../lib/api';
-import { formatNumber } from '../lib/format';
+import { formatNumber, digits } from '../lib/format';
 import { DOC_TYPES, FAMILY_STATUS, HOUSING, INCOME_KINDS, RELATIONS, TAGS, type Housing, type IncomeKind, type Relation, type Tag } from '../lib/labels';
 import type { Conflict, Family } from '../lib/types';
 
@@ -67,7 +67,7 @@ function toPayload(d: Draft) {
       disability: opt(m.disability), chronicIllness: opt(m.chronicIllness),
       documents: m.hasDoc && isDocComplete(m.doc) ? [m.doc] : [],
     })),
-    incomes: d.incomes.filter((i) => i.amount.trim()).map((i) => ({ kind: i.kind, amountIqd: Number(i.amount.replace(/\D/g, '')) })),
+    incomes: d.incomes.filter((i) => i.amount.trim()).map((i) => ({ kind: i.kind, amountIqd: Number(digits(i.amount)) })),
     proxies: d.proxies.filter((p) => p.fullName.trim()).map((p) => ({ fullName: p.fullName.trim(), phone: opt(p.phone), relation: opt(p.relation) })),
   };
 }
@@ -342,7 +342,7 @@ export function Register() {
               <div><dt className="text-sm text-muted">الفئات</dt><dd className="font-semibold">{draft.tags.map((t) => TAGS[t]).join('، ') || '—'}</dd></div>
               <div><dt className="text-sm text-muted">عدد الأفراد الأحياء</dt><dd className="font-semibold">{draft.members.filter((m) => m.status === 'ACTIVE').length}</dd></div>
               <div><dt className="text-sm text-muted">نوع العقار</dt><dd className="font-semibold">{draft.housing ? HOUSING[draft.housing] : '—'}</dd></div>
-              <div><dt className="text-sm text-muted">مجموع الدخل الشهري</dt><dd className="font-semibold">{formatNumber(draft.incomes.reduce((s, i) => s + (Number(i.amount.replace(/\D/g, '')) || 0), 0))} دينار</dd></div>
+              <div><dt className="text-sm text-muted">مجموع الدخل الشهري</dt><dd className="font-semibold">{formatNumber(draft.incomes.reduce((s, i) => s + (Number(digits(i.amount)) || 0), 0))} دينار</dd></div>
               <div><dt className="text-sm text-muted">الوكلاء</dt><dd className="font-semibold">{draft.proxies.filter((p) => p.fullName.trim()).length}</dd></div>
             </dl>
             <Field label="ملاحظات (اختيارية)">{(id) => <Input id={id} value={draft.notes} onChange={(e) => patch({ notes: e.target.value })} />}</Field>

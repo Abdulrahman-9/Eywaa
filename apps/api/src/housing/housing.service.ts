@@ -30,7 +30,7 @@ export class HousingService {
     @Inject(AttachmentsService) private readonly attachments: AttachmentsService,
   ) {}
 
-  // ---------- المتعهدون ----------
+  // ---------- المقاولون ----------
 
   async contractors() {
     const { rows } = await this.db.query(
@@ -52,7 +52,7 @@ export class HousingService {
         return rows[0];
       });
     } catch (err: any) {
-      if (err.code === '23505') throw new ConflictException('متعهد بهذا الاسم موجود');
+      if (err.code === '23505') throw new ConflictException('مقاول بهذا الاسم موجود');
       throw err;
     }
   }
@@ -81,7 +81,7 @@ export class HousingService {
       return this.detail(id);
     } catch (err: any) {
       if (err.code === '23505') throw new ConflictException('لهذه العائلة مشروع بناء قائم');
-      if (err.code === '23503') throw new BadRequestException('المتعهد أو الصندوق غير موجود');
+      if (err.code === '23503') throw new BadRequestException('المقاول أو الصندوق غير موجود');
       throw err;
     }
   }
@@ -124,7 +124,7 @@ export class HousingService {
     if (prev.rowCount) throw new ConflictException('قبل هذه المرحلة مرحلة لم تُصرف دفعتها بعد');
   }
 
-  /** طلب المتعهد صرف دفعة المرحلة. يسجّله مشرف المشاريع. */
+  /** طلب المقاول صرف دفعة المرحلة. يسجّله مشرف المشاريع. */
   async claim(stageId: string, note: string, actor: AuthUser) {
     const projectId = await this.db.tx(async (c) => {
       const s = await this.stage(c, stageId);
@@ -141,7 +141,7 @@ export class HousingService {
   async verify(stageId: string, note: string, actor: AuthUser) {
     const projectId = await this.db.tx(async (c) => {
       const s = await this.stage(c, stageId);
-      if (s.status !== 'CLAIMED') throw new ConflictException(s.status === 'PLANNED' ? 'لم يطلب المتعهد صرف هذه المرحلة بعد' : 'تُحقق من هذه المرحلة من قبل');
+      if (s.status !== 'CLAIMED') throw new ConflictException(s.status === 'PLANNED' ? 'لم يطلب المقاول صرف هذه المرحلة بعد' : 'تُحقق من هذه المرحلة من قبل');
       await c.query("update housing_stages set status = 'VERIFIED', verified_by = $2, verified_at = now(), verify_note = $3 where id = $1", [stageId, actor.id, note]);
       await this.audit.append(c, { actorId: actor.id, action: 'housing.verify', entity: 'housing_stage', entityId: stageId, payload: { stage: s.name, note } });
       return s.project_id as string;
@@ -149,7 +149,7 @@ export class HousingService {
     return this.detail(projectId);
   }
 
-  /** يعيد المرحلة إلى المتعهد: لم تتمّ كما طُلبت. */
+  /** يعيد المرحلة إلى المقاول: لم تتمّ كما طُلبت. */
   async sendBack(stageId: string, note: string, actor: AuthUser) {
     const projectId = await this.db.tx(async (c) => {
       const s = await this.stage(c, stageId);

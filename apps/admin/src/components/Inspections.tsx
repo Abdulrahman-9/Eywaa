@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { cn } from '../lib/cn';
-import { formatAgo, formatDateTime, formatNumber } from '../lib/format';
+import { formatAgo, formatDateTime, formatNumber, digits } from '../lib/format';
 import { FAMILY_STATUS, type FamilyStatus } from '../lib/labels';
 import { CLASS_AR } from '../pages/Scoring';
 import { ReasonDialog } from './ReasonDialog';
@@ -245,7 +245,7 @@ export function InspectionDialog({ id, onClose }: { id: string | null; onClose: 
                 </div>
                 {(choice === 'RAISE' || choice === 'LOWER') && (
                   <div className="flex flex-wrap items-end gap-3">
-                    <div className="w-40"><Field label="عدد النقاط" hint={`من 1 إلى ${d.cap}`}>{(fid) => <Input id={fid} dir="ltr" inputMode="numeric" value={points} onChange={(e) => setPoints(e.target.value.replace(/\D/g, ''))} />}</Field></div>
+                    <div className="w-40"><Field label="عدد النقاط" hint={`من 1 إلى ${d.cap}`}>{(fid) => <Input id={fid} dir="ltr" inputMode="numeric" value={points} onChange={(e) => setPoints(digits(e.target.value))} />}</Field></div>
                     <p className="min-w-0 flex-1 pb-1" data-testid="preview" aria-live="polite">
                       {!p ? <span className="text-muted">اكتب العدد لترى ما تصير إليه نقاطها وفئتها.</span>
                         : p > d.cap ? <span className="font-semibold text-danger">أقصى ما يغيّره الكشف {d.cap} نقاط.</span>
@@ -343,7 +343,7 @@ export function AssignDialog({ open, onClose, preset }: { open: boolean; onClose
                   <Field label="الكشف">{(id) => <Select id={id} value={f.state} onChange={(e) => setF({ ...f, state: e.target.value })}><option value="NONE">غير مكشوفة</option><option value="DONE">مكشوفة (إعادة كشف)</option><option value="ANY">الكل</option></Select>}</Field>
                   <Field label="المحلة">{(id) => <Input id={id} value={f.mahalla} onChange={(e) => setF({ ...f, mahalla: e.target.value })} />}</Field>
                   <Field label="الفئة">{(id) => <Select id={id} value={f.cls} onChange={(e) => setF({ ...f, cls: e.target.value })}><option value="">الكل</option>{Object.entries(CLASS_AR).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>}</Field>
-                  <Field label="أقصى عدد">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={f.limit} onChange={(e) => setF({ ...f, limit: e.target.value.replace(/\D/g, '') })} />}</Field>
+                  <Field label="أقصى عدد">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={f.limit} onChange={(e) => setF({ ...f, limit: digits(e.target.value) })} />}</Field>
                 </div>
               ) : (
                 <Field label="أرقام العوائل" hint="افصل بينها بمسافة أو فاصلة أو سطر">{(id) => <textarea id={id} rows={2} dir="ltr" value={f.numbers} onChange={(e) => setF({ ...f, numbers: e.target.value })} className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2.5" />}</Field>

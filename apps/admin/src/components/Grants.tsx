@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatDateTime, formatNumber } from '../lib/format';
+import { formatDateTime, formatNumber, digits } from '../lib/format';
 import { ReasonDialog } from './ReasonDialog';
 import { useToast } from './toast';
 import { Alert, Badge, Button, Card, Dialog, Field, Input, Select } from './ui';
@@ -83,9 +83,9 @@ export function Grants({ campaignId, active, agents }: { campaignId: string; act
         {create.error && <Alert>{create.error.message}</Alert>}
         <Field label="المتعهد">{(id) => <Select id={id} value={form.agentId} onChange={(e) => setForm({ ...form, agentId: e.target.value })}>{agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select>}</Field>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-3">
-          <Field label="أقصى عدد الحالات">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={form.maxCases} onChange={(e) => setForm({ ...form, maxCases: e.target.value.replace(/\D/g, '') })} />}</Field>
-          <Field label="المقدار لكل حالة">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={form.perCase} onChange={(e) => setForm({ ...form, perCase: e.target.value.replace(/\D/g, '') })} />}</Field>
-          <Field label="يسري (ساعة)">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={form.hours} onChange={(e) => setForm({ ...form, hours: e.target.value.replace(/\D/g, '') })} />}</Field>
+          <Field label="أقصى عدد الحالات">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={form.maxCases} onChange={(e) => setForm({ ...form, maxCases: digits(e.target.value) })} />}</Field>
+          <Field label="المقدار لكل حالة">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={form.perCase} onChange={(e) => setForm({ ...form, perCase: digits(e.target.value) })} />}</Field>
+          <Field label="يسري (ساعة)">{(id) => <Input id={id} dir="ltr" inputMode="numeric" value={form.hours} onChange={(e) => setForm({ ...form, hours: digits(e.target.value) })} />}</Field>
         </div>
         <Field label="سبب التخويل">{(id) => <Input id={id} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="مثال: تأخر الوقت وبقي لحم لا يحتمل إلى الغد" />}</Field>
         <div className="flex flex-wrap justify-end gap-3">

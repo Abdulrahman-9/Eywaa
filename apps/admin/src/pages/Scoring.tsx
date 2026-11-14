@@ -6,7 +6,7 @@ import { useToast } from '../components/toast';
 import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Skeleton } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatDateTime, formatNumber } from '../lib/format';
+import { formatDateTime, formatNumber, digits } from '../lib/format';
 
 type Criteria = Record<string, Record<string, number>>;
 interface Thresholds { a: number; b: number; c: number }
@@ -83,7 +83,7 @@ export function Scoring() {
   if (!data || !criteria || !thresholds || !active) return overview.error ? <Alert>{overview.error.message}</Alert> : <Skeleton className="h-64 w-full" />;
   const { pending, classes, povertyLineIqd, history } = data;
   const total = Object.values(classes).reduce((a, b) => a + b, 0);
-  const num = (v: string) => Math.max(0, Math.min(100, Number(v.replace(/\D/g, '')) || 0));
+  const num = (v: string) => Math.max(0, Math.min(100, Number(digits(v)) || 0));
   const sim = simulation.data;
   const moves = sim ? Object.entries(sim.transitions).sort() : [];
 

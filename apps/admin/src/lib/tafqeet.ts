@@ -21,7 +21,9 @@ function scaled(n: number, [, one, two, plural, accusative]: (typeof SCALES)[num
   if (n === 1) return one;
   if (n === 2) return two;
   const tail = n % 100;
-  return `${below1000(n)} ${tail >= 3 && tail <= 10 ? plural : tail >= 11 ? accusative : one}`;
+  // المئات التامّة تُضاف إلى معدودها، ومثنّاها تُحذف نونه: مئتا ألف، لا «مئتان ألف».
+  const count = tail === 0 ? below1000(n).replace(/ان$/, 'ا') : below1000(n);
+  return `${count} ${tail >= 3 && tail <= 10 ? plural : tail >= 11 ? accusative : one}`;
 }
 
 export function numberInWords(value: number): string {

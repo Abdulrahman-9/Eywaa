@@ -521,7 +521,9 @@ export class DistributionService {
       return free.filter((c) => !have.has(c.familyNo) && !out.has(c.familyNo) && this.misses(c, next).length === 0).length;
     };
     const tries: { label: string; patch: Record<string, unknown>; gain: number }[] = [];
-    const push = (label: string, patch: Partial<Selection>) => { const g = gain(patch); if (g > 0) tries.push({ label, patch: patch as Record<string, unknown>, gain: g }); };
+    // «امسح هذا الشرط» يُكتب null لا undefined: المفتاح الذي قيمته undefined يسقط من JSON، فيصل الاقتراح إلى اللوحة فارغاً ولا يفعل شيئاً.
+    const wire = (patch: Partial<Selection>) => Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v === undefined ? null : v]));
+    const push = (label: string, patch: Partial<Selection>) => { const g = gain(patch); if (g > 0) tries.push({ label, patch: wire(patch), gain: g }); };
     /** أقرب قيمة للحدّ تكسب ما يسدّ النقص؛ فإن لم يسدّه شيء فأبعدها. */
     const nearest = (values: number[], make: (v: number) => Partial<Selection>) => {
       let best: number | undefined;
@@ -705,13 +707,13 @@ export class DistributionService {
 
   async list() {
     const { rows } = await this.db.query(
-      `select c.id, c.name, c.status, c.unit, c.starts_on, c.ends_on, c.created_at, c.closed_at, p.name as program, p.kind,
+      `select c.id, c.name, c.status, c.unit, c.starts_on, c.ends_on, c.created_at, c.closed_at, p.name as program, p.kind, p.item_id,
               count(e.id)::int as families, count(e.id) filter (where e.status = 'DELIVERED')::int as delivered,
               coalesce(sum(e.quantity), 0)::int as quantity
        from campaigns c join programs p on p.id = c.program_id left join entitlements e on e.campaign_id = c.id
-       group by c.id, p.name, p.kind order by c.created_at desc`,
+       group by c.id, p.name, p.kind, p.item_id order by c.created_at desc`,
     );
-    return rows.map((r) => ({ id: r.id, name: r.name, status: r.status, unit: r.unit, startsOn: r.starts_on, endsOn: r.ends_on, program: r.program, kind: r.kind, createdAt: r.created_at, closedAt: r.closed_at, families: r.families, delivered: r.delivered, quantity: r.quantity }));
+    return rows.map((r) => ({ id: r.id, name: r.name, status: r.status, unit: r.unit, startsOn: r.starts_on, endsOn: r.ends_on, program: r.program, kind: r.kind, itemId: r.item_id, createdAt: r.created_at, closedAt: r.closed_at, families: r.families, delivered: r.delivered, quantity: r.quantity }));
   }
 
   async detail(id: string) {

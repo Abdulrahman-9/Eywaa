@@ -8,7 +8,7 @@ import { Alert, Badge, Button, Card, Dialog, Field, Input, PageHeader, Select, S
 import { categoryLabel, VoucherDialog } from '../components/Voucher';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatDateTime, formatNumber } from '../lib/format';
+import { formatDateTime, formatNumber, digits } from '../lib/format';
 import type { Program } from './Programs';
 import type { Donor } from './Reports';
 
@@ -21,7 +21,7 @@ interface Trial { lines: { fund: string; account: string; debit: number; credit:
 const KIND_AR: Record<string, string> = { RECEIPT: 'قبض', PAYMENT: 'صرف', CUSTODY_ISSUE: 'تسليم عهدة', CUSTODY_RETURN: 'إرجاع عهدة', SHORTAGE: 'عجز عهدة', OVERAGE: 'زيادة عهدة', REVERSAL: 'عكس قيد' };
 /** أبواب الصرف المعتادة. يُختار منها ليستقيم تقرير المصارف، ويُكتب غيرها عند الحاجة. */
 const SPEND_CATEGORIES = ['مشتريات مواد', 'نقل وتحميل', 'أجور ومكافآت', 'إيجار', 'وقود', 'صيانة', 'قرطاسية وطباعة', 'اتصالات', 'مصاريف إدارية'];
-const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
+const int = (v: string) => Number(digits(v)) || 0;
 type Form = 'receipt' | 'payment' | 'fund' | 'custody' | 'receive' | null;
 
 function Stat({ label, value, note }: { label: string; value: number; note?: string }) {
@@ -56,7 +56,7 @@ export function Cashbox() {
       if (form === 'receipt') return api<{ no: string }>('/accounting/receipts', { method: 'POST', body: { ...base, description: f.description.trim(), ...(f.donorId ? { donorId: f.donorId } : { party: f.party.trim() }) } });
       if (form === 'payment') return api<{ no: string }>('/accounting/payments', { method: 'POST', body: { ...base, party: f.party.trim(), description: f.description.trim(), category: f.category.trim() } });
       if (form === 'custody') return api<{ no: string }>('/accounting/custody/issue', { method: 'POST', body: { ...base, userId: f.userId } });
-      if (form === 'receive') return api<{ no: string; id?: string }>('/accounting/custody/receive', { method: 'POST', body: { ...base, userId: f.userId, ...(f.description.trim() ? { note: f.description.trim() } : {}) } });
+      if (form === 'receive') return api<{ no: string; id?: string }>('/accounting/custody/receive', { method: 'POST', body: { ...base, userId: f.userId, expectedBook: custody.data?.find((x) => x.userId === f.userId && x.fundId === f.fundId)?.balance, ...(f.description.trim() ? { note: f.description.trim() } : {}) } });
       return api<{ no?: string }>('/accounting/funds', { method: 'POST', body: { name: f.name.trim(), programId: f.programId || null } });
     },
     onSuccess: (r) => { if (form === 'receive' && (r as { id?: string }).id) setVoucher((r as { id?: string }).id!); toast(form === 'payment' ? `سند الصرف ${r.no} ينتظر اعتماد موظف آخر` : form === 'fund' ? 'أُنشئ الصندوق' : `سُجّل القيد ${r.no}`); close(); refresh(); },
@@ -70,7 +70,7 @@ export function Cashbox() {
     onSuccess: () => { toast('سُجّل قيد العكس وينتظر الاعتماد'); setReversing(null); refresh(); },
   });
   const closeCustody = useMutation({
-    mutationFn: () => api<{ book: number; counted: number; difference: number }>('/accounting/custody/close', { method: 'POST', body: { fundId: closing!.fundId, userId: closing!.userId, counted: int(counted) } }),
+    mutationFn: () => api<{ book: number; counted: number; difference: number }>('/accounting/custody/close', { method: 'POST', body: { fundId: closing!.fundId, userId: closing!.userId, counted: int(counted), expectedBook: closing!.balance } }),
     onSuccess: (r) => { toast(r.difference === 0 ? 'أُقفلت العهدة مطابقة' : r.difference < 0 ? `أُقفلت بعجز ${formatNumber(-r.difference)} ينتظر الاعتماد` : `أُقفلت بزيادة ${formatNumber(r.difference)} تنتظر الاعتماد`, r.difference === 0 ? 'ok' : 'info'); setClosing(null); setCounted(''); refresh(); },
   });
 

@@ -1,4 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
+import { digits } from '../lib/format';
 import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { api, tokenStore } from '../lib/api';
@@ -63,14 +64,14 @@ export function Totp({ bare }: { bare?: boolean } = {}) {
             <code dir="ltr" data-testid="totp-secret" className="break-all rounded-lg bg-ground p-2 text-sm">{setup.secret}</code>
           </div>
           <Field label="الرمز من التطبيق">{(id) => <Input id={id} dir="ltr" inputMode="numeric" className="text-center text-xl tracking-[0.4em]" value={code} onChange={(e) => setCode(e.target.value)} />}</Field>
-          <Button className="self-end" disabled={code.replace(/\D/g, '').length !== 6 || enable.isPending} onClick={() => enable.mutate()}>فعّل</Button>
+          <Button className="self-end" disabled={digits(code).length !== 6 || enable.isPending} onClick={() => enable.mutate()}>فعّل</Button>
         </div>
       )}
       {user?.totpEnabled && (
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-40 flex-1"><Field label="لتعطيله: كلمة مرورك">{(id) => <Input id={id} dir="ltr" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />}</Field></div>
           <div className="w-36"><Field label="ورمز من التطبيق">{(id) => <Input id={id} dir="ltr" inputMode="numeric" autoComplete="one-time-code" className="text-center tracking-[0.3em]" value={offCode} onChange={(e) => setOffCode(e.target.value)} />}</Field></div>
-          <Button variant="danger" disabled={!password || offCode.replace(/\D/g, '').length !== 6 || disable.isPending} onClick={() => disable.mutate()}>عطّل</Button>
+          <Button variant="danger" disabled={!password || digits(offCode).length !== 6 || disable.isPending} onClick={() => disable.mutate()}>عطّل</Button>
         </div>
       )}
     </div>
