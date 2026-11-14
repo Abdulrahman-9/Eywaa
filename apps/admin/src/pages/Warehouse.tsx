@@ -12,24 +12,26 @@ interface Wh { id: string; name: string; pointId: string | null; main: boolean }
 interface Stock { warehouses: Wh[]; pendingMoves: number; items: { id: string; name: string; unit: string; byWarehouse: Record<string, number>; main: number; atPoints: number; nearestExpiry: string | null }[] }
 interface Move { id: string; kind: Kind | 'ADJUST'; status: 'POSTED' | 'PENDING' | 'REJECTED'; quantity: number; item: string; unit: string; from: string | null; to: string | null; by: string; note: string | null; source: string | null; campaign: string | null; createdAt: string }
 type Kind = 'RECEIPT' | 'TRANSFER' | 'RETURN' | 'WASTE';
-export interface Reconcile { campaign: string; item: string | null; unit?: string; shortage?: number; points: { pointId: string; point: string; needed: number; sent: number; delivered: number; returned: number; remaining: number; shortage: number }[] }
+export interface Reconcile { campaign: string; item: string | null; unit?: string; shortage?: number; points: { pointId: string; point: string; needed: number; sent: number; delivered: number; granted?: number; returned: number; remaining: number; shortage: number }[] }
 
 const KIND_AR = { RECEIPT: 'وارد', TRANSFER: 'تحويل', RETURN: 'راجع', WASTE: 'تالف', ADJUST: 'تسوية جرد' } as const;
 const int = (v: string) => Number(v.replace(/\D/g, '')) || 0;
 
-/** جدول المطابقة: ما خرج إلى النقطة = ما سُلِّم + ما رجع + ما بقي. */
+/** جدول المطابقة: ما خرج إلى النقطة = ما سُلِّم بالرموز + ما صُرف بالتخويل + ما رجع + ما بقي. */
 export function ReconcileTable({ data }: { data: Reconcile }) {
   if (!data.item) return <p className="text-muted">برنامج هذه الحملة غير مربوط بصنف في المخزن، فلا مطابقة له.</p>;
+  // عمود التخويل يظهر إن صُرف به شيء في هذه الحملة، فلا يُزحم الجدول بصفر في كل صف.
+  const grants = data.points.some((p) => p.granted);
   return (
     <>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[32rem] border-collapse text-sm">
-          <thead><tr className="text-muted">{['النقطة', 'حاجتها', 'أُرسل', 'سُلِّم', 'رجع', 'باقٍ فيها', 'الفرق'].map((h) => <th key={h} scope="col" className="border-b border-line p-2 text-start font-medium">{h}</th>)}</tr></thead>
+          <thead><tr className="text-muted">{['النقطة', 'حاجتها', 'أُرسل', 'سُلِّم', ...(grants ? ['بالتخويل'] : []), 'رجع', 'باقٍ فيها', 'الفرق'].map((h) => <th key={h} scope="col" className="border-b border-line p-2 text-start font-medium">{h}</th>)}</tr></thead>
           <tbody>
             {data.points.map((p) => (
               <tr key={p.pointId} className="border-b border-line last:border-0">
                 <td className="p-2 font-semibold">{p.point}</td>
-                {[p.needed, p.sent, p.delivered, p.returned, p.remaining].map((n, i) => <td key={i} className="p-2 tabular-nums">{formatNumber(n)}</td>)}
+                {[p.needed, p.sent, p.delivered, ...(grants ? [p.granted ?? 0] : []), p.returned, p.remaining].map((n, i) => <td key={i} className="p-2 tabular-nums">{formatNumber(n)}</td>)}
                 <td className="p-2 font-bold">{p.shortage ? <span className="text-danger">{formatNumber(p.shortage)} ناقصة</span> : <span className="text-brand-strong">0</span>}</td>
               </tr>
             ))}

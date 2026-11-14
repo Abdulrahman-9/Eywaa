@@ -175,7 +175,8 @@ export class InventoryService {
       this.db.query('select id, name, unit from items where active order by name'),
       this.db.query('select warehouse_id, item_id, quantity from stock_balances'),
       this.db.query("select count(*)::int as n from stock_moves where status = 'PENDING'"),
-      this.db.query("select item_id, min(expiry) as nearest from stock_moves where kind = 'RECEIPT' and status = 'POSTED' and expiry >= current_date group by item_id"),
+      // المنتهي لا يُسقط من التنبيه: ما انتهت صلاحيته في آخر تسعين يوماً يبقى ظاهراً حتى يُجرد أو يُتلف، وإلا اختفى التنبيه يوم يشتدّ لزومه.
+      this.db.query("select item_id, min(expiry) as nearest from stock_moves where kind = 'RECEIPT' and status = 'POSTED' and expiry >= current_date - 90 group by item_id"),
     ]);
     const bal = new Map(balances.rows.map((b) => [`${b.warehouse_id}:${b.item_id}`, b.quantity as number]));
     const exp = new Map(expiry.rows.map((e) => [e.item_id, e.nearest]));
@@ -215,18 +216,21 @@ export class InventoryService {
     if (!camp.item_id) return { campaign: camp.name, item: null, points: [], difference: 0 };
     const { rows } = await this.db.query(
       `select dp.id, dp.name,
-              coalesce((select sum(m.quantity) from stock_moves m where m.campaign_id = $1 and m.kind = 'TRANSFER' and m.status = 'POSTED' and m.to_wh = w.id), 0)::int as sent,
-              coalesce((select sum(m.quantity) from stock_moves m where m.campaign_id = $1 and m.kind = 'RETURN' and m.status = 'POSTED' and m.from_wh = w.id), 0)::int as returned,
+              coalesce((select sum(m.quantity) from stock_moves m where m.campaign_id = $1 and m.item_id = $2 and m.kind = 'TRANSFER' and m.status = 'POSTED' and m.to_wh = w.id), 0)::int as sent,
+              coalesce((select sum(m.quantity) from stock_moves m where m.campaign_id = $1 and m.item_id = $2 and m.kind = 'RETURN' and m.status = 'POSTED' and m.from_wh = w.id), 0)::int as returned,
               coalesce((select sum(e.quantity) from entitlements e where e.campaign_id = $1 and e.status = 'DELIVERED' and e.delivered_point = dp.id), 0)::int as delivered,
+              coalesce((select sum(m.quantity) from stock_moves m where m.campaign_id = $1 and m.item_id = $2 and m.kind = 'ISSUE' and m.status = 'POSTED' and m.emergency_case_id is not null and m.from_wh = w.id), 0)::int as granted,
               coalesce((select sum(e.quantity) from entitlements e where e.campaign_id = $1 and e.point_id = dp.id and e.status <> 'CANCELLED'), 0)::int as needed
        from distribution_points dp left join warehouses w on w.point_id = dp.id
        where exists (select 1 from entitlements e where e.campaign_id = $1 and (e.point_id = dp.id or e.delivered_point = dp.id))
+          or exists (select 1 from stock_moves m where m.campaign_id = $1 and m.item_id = $2 and (m.to_wh = w.id or m.from_wh = w.id))
        order by dp.name`,
-      [campaignId],
+      [campaignId, camp.item_id],
     );
     const points = rows.map((r) => {
-      const remaining = r.sent - r.delivered - r.returned;
-      return { pointId: r.id, point: r.name, needed: r.needed, sent: r.sent, delivered: r.delivered, returned: r.returned, remaining: Math.max(remaining, 0), shortage: Math.max(-remaining, 0) };
+      // ما صُرف بالتخويل الاستثنائي خرج من مخزن النقطة كما خرج ما سُلِّم بالرموز: لو أُسقط من الحساب لظهر «باقياً» وهو ليس في المخزن.
+      const remaining = r.sent - r.delivered - r.granted - r.returned;
+      return { pointId: r.id, point: r.name, needed: r.needed, sent: r.sent, delivered: r.delivered, granted: r.granted, returned: r.returned, remaining: Math.max(remaining, 0), shortage: Math.max(-remaining, 0) };
     });
     return { campaign: camp.name, item: camp.item, unit: camp.unit, points, shortage: points.reduce((s, p) => s + p.shortage, 0) };
   }

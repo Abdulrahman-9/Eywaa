@@ -368,3 +368,14 @@ describe('اعتماد التسجيل مع اعتماد الكشف', () => {
     expect(ok.body).toMatchObject({ effect: 'NONE', familyApproved: true, familyStatus: 'APPROVED', pointsAfter: 53 });
   });
 });
+
+describe('ما أضافته المراجعة إلى الكشف', () => {
+  it('مديران يكلّفان بالعائلة نفسها في اللحظة نفسها: كشف واحد، والثاني يُخبَر أن عليها كشفاً', async () => {
+    const f = await approved();
+    const pair = await Promise.all([assign([f.id], ['agent']), assign([f.id], ['agent2'], {}, 'admin')]);
+    expect(pair.map((r) => r.status)).toEqual([201, 201]);
+    expect(pair.map((r) => r.body.created).sort()).toEqual([0, 1]);
+    expect(pair.flatMap((r) => r.body.skipped.map((x: any) => x.reason))).toEqual(['عليها كشف قائم']);
+    expect((await sql("select count(*)::int as n from inspections where family_id = $1 and status in ('ASSIGNED', 'SUBMITTED')", [f.id])).rows[0].n).toBe(1);
+  });
+});

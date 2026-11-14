@@ -189,10 +189,13 @@ export class InspectionsService {
     return this.db.tx(async (c) => {
       const inspectors = (await c.query('select id, full_name from users where id = any($1) and active and role = any($2)', [input.inspectorIds, INSPECTOR_ROLES])).rows;
       if (inspectors.length !== input.inspectorIds.length) throw new BadRequestException('يُكلَّف بالكشف متعهد أو باحث ميداني عامل');
+      // القفل أولاً ثم القراءة بجملة ثانية: لو قُرئ «عليها كشف قائم» في جملة القفل نفسها لرآه مديران متسابقان «لا» معاً،
+      // فيُدرج الثاني كشفاً ثانياً ويردّه قيد الفرادة بخطأ خادم.
+      await c.query('select 1 from families where id = any($1) order by id for update', [input.familyIds]);
       const fams = (await c.query(
         `select f.id, f.family_no, f.status, f.created_by,
                 exists (select 1 from inspections i where i.family_id = f.id and i.status in ('ASSIGNED', 'SUBMITTED')) as inspecting
-         from families f where f.id = any($1) order by f.mahalla nulls last, f.family_no for update of f`, [input.familyIds])).rows;
+         from families f where f.id = any($1) order by f.mahalla nulls last, f.family_no`, [input.familyIds])).rows;
       const created: { id: string; no: number; familyNo: string }[] = [];
       const skipped: { familyNo: string; reason: string }[] = [];
       let turn = 0;

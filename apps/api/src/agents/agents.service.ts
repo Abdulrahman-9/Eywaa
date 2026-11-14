@@ -120,6 +120,11 @@ const ACTIVITY: Record<string, (p: any) => string> = {
  * المتعهد يد المركز في الميدان: يوزّع، ويحصّل الصناديق، ويتسلّم التبرعات، ويرفع الطلبات.
  * وكل ما دخل يده مالاً قُيّد في ذمته ساعةَ دخوله، فلا يخرج من الذمة إلا بتسليم يشهد به المحاسب.
  */
+/** رسائل الشكر التي يُخرجها المتعهد الواحد في اليوم. ما زاد يُسجَّل تبرعه ولا تُرسل رسالته. */
+const THANKS_PER_AGENT_PER_DAY = 40;
+/** نص يكتبه المتعهد ويدخل رسالة باسم المركز: حروف وأرقام ومسافات، مقصوص. */
+const plain = (v: string, max: number) => v.replace(/[^\p{L}\p{M}\p{N} ،'-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+
 @Injectable()
 export class AgentsService {
   constructor(
@@ -260,6 +265,17 @@ export class AgentsService {
       const prior = (await this.db.query('select id from box_collections where client_op_id = $1', [input.clientOpId])).rows[0];
       if (prior) return this.collection(prior.id);
     }
+    try {
+      return await this.collectOnce(boxId, input, actor);
+    } catch (err: any) {
+      // الطلب نفسه وصل مرتين معاً (إعادة من هاتف ضعيف الشبكة): الثاني يُجاب بما سُجّل للأول، لا بخطأ خادم.
+      const prior = err?.code === '23505' && input.clientOpId ? (await this.db.query('select id from box_collections where client_op_id = $1', [input.clientOpId])).rows[0] : null;
+      if (prior) return this.collection(prior.id);
+      throw err;
+    }
+  }
+
+  private async collectOnce(boxId: string, input: CollectionInput, actor: AuthUser) {
     const at = input.collectedAt ? new Date(input.collectedAt) : new Date();
     if (at.getTime() > Date.now() + 5 * 60_000) throw new BadRequestException('وقت الفتح في المستقبل');
     const books = actor.role === 'ADMIN' || actor.role === 'ACCOUNTANT';
@@ -351,6 +367,16 @@ export class AgentsService {
       const prior = (await this.db.query('select id from agent_donations where client_op_id = $1', [input.clientOpId])).rows[0];
       if (prior) return this.donation(prior.id);
     }
+    try {
+      return await this.donateOnce(input, actor);
+    } catch (err: any) {
+      const prior = err?.code === '23505' && input.clientOpId ? (await this.db.query('select id from agent_donations where client_op_id = $1', [input.clientOpId])).rows[0] : null;
+      if (prior) return this.donation(prior.id);
+      throw err;
+    }
+  }
+
+  private async donateOnce(input: DonationInput, actor: AuthUser) {
     const at = input.reportedAt ? new Date(input.reportedAt) : new Date();
     if (at.getTime() > Date.now() + 5 * 60_000) throw new BadRequestException('وقت التبرع في المستقبل');
     const done = await this.db.tx(async (c) => {
@@ -378,12 +404,15 @@ export class AgentsService {
       });
       return { id: rows[0].id as string, no, entryNo: entry?.no ?? null };
     });
-    if (input.donorPhone) {
+    // الرسالة تخرج باسم المركز إلى رقم يكتبه المتعهد: فما كتبه يدخلها حروفاً وأرقاماً لا غير (لا روابط)، ولكل متعهد حدّ في اليوم.
+    const sentToday = (await this.db.query(
+      "select count(*)::int as n from agent_donations where agent_id = $1 and donor_phone is not null and reported_at > now() - interval '24 hours'", [actor.id])).rows[0].n;
+    if (input.donorPhone && sentToday <= THANKS_PER_AGENT_PER_DAY) {
       const what = input.kind === 'CASH'
         ? `تبرعاً نقدياً قدره ${fmt(input.amount)} دينار، سند قبض ${done.entryNo}`
-        : `تبرعاً عينياً: ${input.quantity} ${input.unit ?? ''} ${input.itemText}، بلاغ رقم ${done.no}`.replace(/\s+/g, ' ');
+        : `تبرعاً عينياً: ${input.quantity} ${plain(input.unit ?? '', 15)} ${plain(input.itemText, 40)}، بلاغ رقم ${done.no}`.replace(/\s+/g, ' ');
       await this.notifications.direct('شكر متبرع',
-        `جزاكم الله خيراً ${input.donorName}. تسلّم المركز منكم ${what}، بيد متعهده ${actor.fullName}. إن خالف هذا ما قدّمتم فأبلغوا المركز.`,
+        `جزاكم الله خيراً ${plain(input.donorName, 40)}. تسلّم المركز منكم ${what}، بيد متعهده ${actor.fullName}. إن خالف هذا ما قدّمتم فأبلغوا المركز.`,
         input.donorPhone, { agentDonationId: done.id });
     }
     return this.donation(done.id);

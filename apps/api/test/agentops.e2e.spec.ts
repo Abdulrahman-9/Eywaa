@@ -400,3 +400,27 @@ describe('متابعة المتعهدين', () => {
     expect((await get(`/agents/${randomUUID()}`, 'manager')).status).toBe(404);
   });
 });
+
+describe('ما أضافته المراجعة إلى عمل المتعهد', () => {
+  it('الطلب نفسه يصل مرتين معاً من هاتف ضعيف الشبكة: تحصيل واحد وتبرع واحد، ولا خطأ خادم', async () => {
+    const op = randomUUID();
+    const twice = await Promise.all([1, 2].map(() => post(`/boxes/${box}/collections`, 'agent', { amount: 12_000, clientOpId: op })));
+    expect(twice.every((r) => r.status < 300)).toBe(true);
+    expect(twice[0].body.id).toBe(twice[1].body.id);
+    expect((await sql('select count(*)::int as n from box_collections where client_op_id = $1', [op])).rows[0].n).toBe(1);
+    const gift = randomUUID();
+    const pair = await Promise.all([1, 2].map(() => post('/agent-donations', 'agent', { kind: 'CASH', donorName: 'فاعل خير', amount: 5_000, clientOpId: gift })));
+    expect(pair.every((r) => r.status < 300)).toBe(true);
+    expect((await sql('select count(*)::int as n from agent_donations where client_op_id = $1', [gift])).rows[0].n).toBe(1);
+  });
+
+  it('رسالة الشكر تخرج باسم المركز: ما يكتبه المتعهد يدخلها حروفاً وأرقاماً بلا روابط', async () => {
+    const d = await post('/agent-donations', 'agent', { kind: 'IN_KIND', donorName: 'زر الرابط http://evil.example/x?y=1', donorPhone: '07901234567', itemText: 'رز <b>ممتاز</b> bit.ly/abc', quantity: 3, unit: 'كيس' });
+    expect(d.status).toBe(201);
+    const text = (await sql('select text from messages where agent_donation_id = $1', [d.body.id])).rows[0].text as string;
+    // لا نقطة بين الكلمات ولا شرطة مائلة: لا يبقى في الرسالة ما يجعله الهاتف رابطاً.
+    expect(text).toContain('جزاكم الله خيراً زر الرابط http evil example x y 1.');
+    expect(text).toContain('3 كيس رز b ممتاز b bit ly abc،');
+    expect(text).not.toMatch(/[/<>?=]|evil\.example|bit\.ly/);
+  });
+});

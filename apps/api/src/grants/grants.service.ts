@@ -36,6 +36,9 @@ const SAME_PERSON = 0.9;
  * التخويل الاستثنائي: صرف بلا رمز لمن ليس مسجَّلاً، حين يتأخر الوقت والطعام لا يحتمل.
  * هو أضيق باب في النظام: متعهد بعينه، حملة بعينها، سقف ومدة وسبب؛ وكل حالة باسمها تُراجَع غداً.
  */
+/** أقصى ما يُقبل من تأخّر رفع حالة وقعت والتخويل سارٍ (هاتف منقطع)، بالساعات بعد انتهائه أو سحبه. */
+const LATE_UPLOAD_HOURS = 48;
+
 @Injectable()
 export class GrantsService {
   constructor(
@@ -95,6 +98,11 @@ export class GrantsService {
       if (g.status !== 'ACTIVE' && at.getTime() >= new Date(g.revoked_at).getTime()) throw new ConflictException({ message: 'سُحب هذا التخويل', code: 'GRANT_CLOSED' });
       if (at.getTime() > new Date(g.expires_at).getTime()) throw new ConflictException({ message: 'انتهت مدة التخويل', code: 'GRANT_CLOSED' });
       const lateUpload = g.status !== 'ACTIVE' || Date.now() > new Date(g.expires_at).getTime();
+      // وقت الحالة يقوله الهاتف، فلا يُقبل بلا حدّ: هاتف منقطع يومين يُصدَّق، وما رُفع بعدهما لا يُسجَّل بالتخويل.
+      const closedAt = Math.min(new Date(g.expires_at).getTime(), g.revoked_at ? new Date(g.revoked_at).getTime() : Infinity);
+      if (lateUpload && Date.now() > closedAt + LATE_UPLOAD_HOURS * 3_600_000) {
+        throw new ConflictException({ message: `انتهت مهلة رفع حالات هذا التخويل (${LATE_UPLOAD_HOURS} ساعة بعد انتهائه). راجع مدير التوزيع.`, code: 'GRANT_CLOSED' });
+      }
       if (at.getTime() < new Date(g.created_at).getTime() - 60_000) throw new ConflictException({ message: 'الحالة قبل صدور التخويل', code: 'GRANT_CLOSED' });
       if (g.campaign_status !== 'ACTIVE') throw new ConflictException({ message: 'الحملة ليست جارية', code: 'GRANT_CLOSED' });
       const used = (await c.query('select count(*)::int as n from emergency_cases where grant_id = $1', [grantId])).rows[0].n;
