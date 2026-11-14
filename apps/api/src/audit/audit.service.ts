@@ -39,7 +39,9 @@ export class AuditService {
    * وإن فشل السطر لم تتمّ العملية.
    */
   async append(client: PoolClient, entry: AuditEntry): Promise<void> {
-    const full = { ...entry, payload: entry.payload ?? {} };
+    // الحمولة تُحوَّل إلى صيغتها المحفوظة قبل حساب البصمة (التاريخ يصير نصاً مثلاً)،
+    // وإلا اختلفت البصمة عند إعادة الحساب من القاعدة فبدا السجل معبوثاً به وهو سليم.
+    const full = { ...entry, payload: JSON.parse(JSON.stringify(entry.payload ?? {})) as Record<string, unknown> };
     // قفل يجعل الإضافة إلى السلسلة واحدة بعد واحدة.
     await client.query('select pg_advisory_xact_lock($1)', [CHAIN_LOCK]);
     const last = await client.query('select hash from audit_log order by seq desc limit 1');

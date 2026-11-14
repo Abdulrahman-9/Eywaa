@@ -10,6 +10,8 @@ import { AuthGuard } from './auth/auth.guard';
 import { ChangesController } from './changes/changes.controller';
 import { ChangesService } from './changes/changes.service';
 import { DbModule } from './db/db.module';
+import { DistributionController } from './distribution/distribution.controller';
+import { DistributionService } from './distribution/distribution.service';
 import { FamiliesController } from './families/families.controller';
 import { FamiliesService } from './families/families.service';
 import { ProgramsController } from './programs/programs.controller';
@@ -25,10 +27,10 @@ import { UsersController } from './users/users.controller';
   imports: [DbModule],
   controllers: [
     AuthController, UsersController, AuditController, SettingsController, StatsController,
-    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController,
+    FamiliesController, AttachmentsController, ChangesController, ScoringController, ProgramsController, DistributionController,
   ],
   providers: [
-    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService,
+    AuditService, SettingsService, ScoringService, FamiliesService, Storage, AttachmentsService, ChangesService, ProgramsService, DistributionService,
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
 })

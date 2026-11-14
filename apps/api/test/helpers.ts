@@ -29,6 +29,7 @@ export async function startApp(): Promise<INestApplication> {
   process.env.JWT_SECRET = randomBytes(32).toString('hex');
   process.env.FIELD_ENC_KEY = randomBytes(32).toString('base64');
   process.env.FIELD_HMAC_KEY = randomBytes(32).toString('base64');
+  process.env.TOKEN_SIGNING_SEED = randomBytes(32).toString('base64');
   process.env.STORAGE_DIR = mkdtempSync(join(tmpdir(), 'eywaa-storage-'));
 
   await sql('drop schema public cascade; create schema public;');
@@ -37,7 +38,8 @@ export async function startApp(): Promise<INestApplication> {
   const hash = await hashPassword(PASSWORD);
   for (const [username, role] of [
     ['admin', 'ADMIN'], ['researcher', 'FIELD_RESEARCHER'], ['researcher2', 'FIELD_RESEARCHER'],
-    ['supervisor', 'BENEFICIARY_SUPERVISOR'], ['distributor', 'DISTRIBUTOR'], ['auditor', 'AUDITOR'],
+    ['supervisor', 'BENEFICIARY_SUPERVISOR'], ['distributor', 'DISTRIBUTOR'], ['distributor2', 'DISTRIBUTOR'],
+    ['manager', 'DISTRIBUTION_MANAGER'], ['manager2', 'DISTRIBUTION_MANAGER'], ['auditor', 'AUDITOR'],
   ]) {
     await sql('insert into users (username, full_name, password_hash, role) values ($1,$1,$2,$3)', [username, hash, role]);
   }

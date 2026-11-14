@@ -11,6 +11,8 @@ const schema = z.object({
   FIELD_ENC_KEY: key32,
   FIELD_HMAC_KEY: key32,
   STORAGE_DIR: z.string().default('./storage'),
+  // بذرة مفتاح توقيع رموز الاستلام (Ed25519). من يملكها يصدر رموزاً صحيحة، فتُحفظ كأشد الأسرار.
+  TOKEN_SIGNING_SEED: key32,
 });
 
 export type Config = z.infer<typeof schema>;

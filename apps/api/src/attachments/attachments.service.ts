@@ -8,7 +8,7 @@ import { sniffMime } from './file-type';
 import { Storage } from './storage';
 
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
-export const CATEGORIES = ['PHOTO', 'IDENTITY', 'RATION_CARD', 'RESIDENCE_CARD', 'MEDICAL', 'PAPER_FORM', 'OTHER'] as const;
+export const CATEGORIES = ['PHOTO', 'IDENTITY', 'RATION_CARD', 'RESIDENCE_CARD', 'MEDICAL', 'PAPER_FORM', 'OTHER', 'DELIVERY_PROOF'] as const;
 export type Category = (typeof CATEGORIES)[number];
 /** عمر رابط التنزيل. */
 const LINK_TTL_SECONDS = 300;

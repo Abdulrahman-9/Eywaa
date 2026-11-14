@@ -313,6 +313,14 @@ describe('سجل التدقيق', () => {
     expect(log.body[0].actor).toBe('supervisor');
   });
 
+  it('حمولة فيها تاريخ لا تكسر السلسلة عند إعادة الحساب', async () => {
+    const { AuditService } = await import('../src/audit/audit.service');
+    const { Db } = await import('../src/db/db.module');
+    const audit = app.get(AuditService);
+    await app.get(Db).tx((c) => audit.append(c, { actorId: null, action: 'test.date', entity: 'test', entityId: '1', payload: { when: new Date(), nested: { at: new Date(0), n: undefined } } as any }));
+    expect((await api().get('/api/audit/verify').set(as('auditor'))).body.ok).toBe(true);
+  });
+
   it('العملية المرفوضة لا تترك سطراً', async () => {
     const before = (await api().get('/api/audit/verify').set(as('auditor'))).body.entries;
     const f = family();
